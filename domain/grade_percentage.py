@@ -1,8 +1,10 @@
 from dataclasses import dataclass
+from typing import Optional
+
 
 @dataclass
 class GradePercentage:
-    percentage_id: str
+    percentage_id: Optional[int]
     percentage: float
-    offering_id: str
-    component_id: str
+    class_id: int
+    component_id: int

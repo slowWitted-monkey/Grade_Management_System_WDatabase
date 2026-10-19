@@ -1,90 +1,80 @@
-from typing import List, Optional, Union
+import psycopg2
+
 from config.database import get_db_connection
 from domain.teacher import Teacher
 
 
 class TeacherRepository:
-    def find_all(self) -> List[Teacher]:
-        """Fetches all teachers from the database sorted by last name, first name."""
+    def find_all(self):
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT teacher_id, first_name, last_name, email, department, status "
-            "FROM teacher ORDER BY last_name, first_name;"
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT teacher_id, first_name, last_name, email, department, status FROM teacher ORDER BY last_name, first_name")
+                return [Teacher(*row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def save(self, teacher_or_id, first_name=None, last_name=None, email=None, department=None, status="Active"):
+        teacher = teacher_or_id if isinstance(teacher_or_id, Teacher) else Teacher(
+            teacher_or_id, first_name or "", last_name or "", email, department or "", status
         )
-        rows = cursor.fetchall()
-        cursor.close()
-        conn.close()
-
-        teachers = []
-        for r in rows:
-            if isinstance(r, dict):
-                teachers.append(Teacher(
-                    teacher_id=r.get("teacher_id"),
-                    first_name=r.get("first_name"),
-                    last_name=r.get("last_name"),
-                    email=r.get("email"),
-                    department=r.get("department"),
-                    status=r.get("status", "Active")
-                ))
-            else:
-                teachers.append(Teacher(
-                    teacher_id=r[0],
-                    first_name=r[1],
-                    last_name=r[2],
-                    email=r[3],
-                    department=r[4],
-                    status=r[5] if len(r) > 5 else "Active"
-                ))
-        return teachers
-
-    def save(
-            self,
-            teacher_or_id: Union[Teacher, str],
-            first_name: Optional[str] = None,
-            last_name: Optional[str] = None,
-            email: Optional[str] = None,
-            department: Optional[str] = None,
-            status: str = "Active"
-    ) -> None:
-        """Inserts or updates a teacher record using either a Teacher object or positional values."""
-        if isinstance(teacher_or_id, Teacher):
-            t_id = teacher_or_id.teacher_id
-            f_name = teacher_or_id.first_name
-            l_name = teacher_or_id.last_name
-            e_mail = teacher_or_id.email
-            dept = teacher_or_id.department
-            stat = getattr(teacher_or_id, 'status', 'Active')
-        else:
-            t_id = teacher_or_id
-            f_name = first_name
-            l_name = last_name
-            e_mail = email
-            dept = department
-            stat = status
-
+        self._validate(teacher)
         conn = get_db_connection()
-        cursor = conn.cursor()
-        query = """
-            INSERT INTO teacher (teacher_id, first_name, last_name, email, department, status)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT (teacher_id) DO UPDATE SET
-                first_name = EXCLUDED.first_name,
-                last_name = EXCLUDED.last_name,
-                email = EXCLUDED.email,
-                department = EXCLUDED.department,
-                status = EXCLUDED.status;
-        """
-        cursor.execute(query, (t_id, f_name, l_name, e_mail, dept, stat))
-        conn.commit()
-        cursor.close()
-        conn.close()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""INSERT INTO teacher
+                    (teacher_id, first_name, last_name, email, department, status)
+                    VALUES (%s,%s,%s,%s,%s,%s)""",
+                    (teacher.teacher_id, teacher.first_name.strip(), teacher.last_name.strip(),
+                     teacher.email or None, teacher.department.strip(), teacher.status or "Active"))
+            conn.commit()
+        except psycopg2.errors.UniqueViolation as exc:
+            conn.rollback()
+            raise ValueError(f"Teacher ID '{teacher.teacher_id}' already exists.") from exc
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
-    def delete_by_id(self, teacher_id: str) -> None:
-        """Deletes a teacher record by ID."""
+    def update(self, teacher: Teacher):
+        self._validate(teacher)
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM teacher WHERE teacher_id = %s;", (teacher_id,))
-        conn.commit()
-        cursor.close()
-        conn.close()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""UPDATE teacher SET first_name=%s, last_name=%s, email=%s,
+                    department=%s, status=%s WHERE teacher_id=%s""",
+                    (teacher.first_name.strip(), teacher.last_name.strip(), teacher.email or None,
+                     teacher.department.strip(), teacher.status or "Active", teacher.teacher_id))
+                if not cursor.rowcount:
+                    raise ValueError(f"Teacher '{teacher.teacher_id}' was not found.")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _validate(teacher):
+        if not teacher.teacher_id.strip() or not teacher.first_name.strip() or not teacher.last_name.strip():
+            raise ValueError("Teacher ID, first name, and last name are required.")
+        if not teacher.department.strip():
+            raise ValueError("Department is required.")
+
+    def delete_by_id(self, teacher_id: str):
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM teacher WHERE teacher_id=%s", (teacher_id,))
+                if not cursor.rowcount:
+                    raise ValueError(f"Teacher '{teacher_id}' was not found.")
+            conn.commit()
+        except psycopg2.errors.ForeignKeyViolation as exc:
+            conn.rollback()
+            raise ValueError("Teacher cannot be deleted while a class offering depends on the record.") from exc
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
