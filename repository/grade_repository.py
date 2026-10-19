@@ -40,16 +40,16 @@ class GradeRepository:
             conn.close()
 
     def get_scores_for_grade(self, student_id: str, offering_id: str) -> list:
-        """Fetches score, max_score, and weight for component grade calculation."""
+        """Fetches score, max_score, and weight for component grade calculation using correct table names."""
         conn = get_db_connection()
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                SELECT cs.score, a.max_score, gp.percentage
-                FROM componentscore cs
-                JOIN assessment a ON cs.assessment_id = a.assessment_id
-                JOIN enrollment e ON cs.enrollment_id = e.enrollment_id
-                LEFT JOIN grade_percentage gp ON (gp.class_id = e.offering_id AND gp.component_id = a.component_id)
+                SELECT gcs.score, gcs.max_score, gp.percentage
+                FROM gradecomponentscore gcs
+                JOIN gradecomponent gc ON gcs.component_id = gc.component_id
+                JOIN enrollment e ON gcs.enrollment_id = e.enrollment_id
+                LEFT JOIN gradepercentage gp ON (gp.offering_id = e.offering_id AND gp.component_id = gc.component_id)
                 WHERE e.student_id = %s AND e.offering_id = %s;
             """, (student_id, offering_id))
             rows = cursor.fetchall()
@@ -69,12 +69,32 @@ class GradeRepository:
             cursor.close()
             conn.close()
 
+    def save_or_update_grade(self, grade_id: str, enrollment_id: str, period_id: str, final_grade: float, remarks: str, final_equiv: float = None):
+        """Directly inserts or updates a grade record from the GUI form."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO grade (grade_id, enrollment_id, period_id, final_grade, final_equiv, remarks, date_encoded)
+                VALUES (%s, %s, %s, %s, %s, %s, CURRENT_DATE)
+                ON CONFLICT (enrollment_id, period_id) 
+                DO UPDATE SET 
+                    final_grade = EXCLUDED.final_grade,
+                    final_equiv = EXCLUDED.final_equiv,
+                    remarks = EXCLUDED.remarks,
+                    date_encoded = CURRENT_DATE;
+            """, (grade_id, enrollment_id, period_id, final_grade, final_equiv, remarks))
+            conn.commit()
+            self.log_audit_event("GRADE", enrollment_id, "UPSERT", f"Grade: {final_grade}", f"Saved Grade: {final_grade}")
+        finally:
+            cursor.close()
+            conn.close()
+
     def update_grade_record(self, enrollment_id: str, midterm_pct: float, finals_pct: float, overall_pct: float, midterm_equiv: float, final_equiv: float, remarks: str):
         """Persists percentages, grade point equivalents, and remarks into GRADE table."""
         conn = get_db_connection()
         cursor = conn.cursor()
         try:
-            # Check old grade state for audit logging
             cursor.execute("""
                 SELECT midterm_grade, overall_grade FROM grade WHERE enrollment_id = %s;
             """, (enrollment_id,))
@@ -103,11 +123,8 @@ class GradeRepository:
             cursor.close()
             conn.close()
 
-    def update_period_weights(self, class_id: str, period_weights: dict):
-        """
-        Updates component weights for a class period. Enforces 100% sum validation.
-        period_weights format: {component_id: weight_percentage}
-        """
+    def update_period_weights(self, offering_id: str, period_weights: dict):
+        """Updates component weights for an offering period. Enforces 100% sum validation."""
         total_weight = sum(period_weights.values())
         if round(total_weight, 2) != 100.0:
             raise ValueError(f"Weight validation failed! Period weights sum to {total_weight}%, but must equal exactly 100.0%.")
@@ -121,21 +138,36 @@ class GradeRepository:
         try:
             for comp_id, weight in period_weights.items():
                 cursor.execute("""
-                    SELECT percentage FROM grade_percentage WHERE class_id = %s AND component_id = %s;
-                """, (class_id, comp_id))
+                    SELECT percentage FROM gradepercentage WHERE offering_id = %s AND component_id = %s;
+                """, (offering_id, comp_id))
                 old_row = cursor.fetchone()
                 old_weight = old_row[0] if old_row else 0.0
 
                 cursor.execute("""
-                    INSERT INTO grade_percentage (class_id, component_id, percentage)
+                    INSERT INTO gradepercentage (offering_id, component_id, percentage)
                     VALUES (%s, %s, %s)
-                    ON CONFLICT (class_id, component_id)
+                    ON CONFLICT (offering_id, component_id)
                     DO UPDATE SET percentage = EXCLUDED.percentage;
-                """, (class_id, comp_id, weight))
+                """, (offering_id, comp_id, weight))
 
-                self.log_audit_event("GRADE_PERCENTAGE", f"{class_id}_{comp_id}", "UPDATE", f"Weight: {old_weight}%", f"Weight: {weight}%")
+                self.log_audit_event("GRADE_PERCENTAGE", f"{offering_id}_{comp_id}", "UPDATE", f"Weight: {old_weight}%", f"Weight: {weight}%")
 
             conn.commit()
+        finally:
+            cursor.close()
+            conn.close()
+
+    def get_all_audit_logs(self) -> list:
+        """Fetches all audit trail records from AUDIT_LOG table."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT log_id, table_name, record_id, action, old_value, new_value, changed_by, changed_at
+                FROM audit_log
+                ORDER BY changed_at DESC;
+            """)
+            return cursor.fetchall()
         finally:
             cursor.close()
             conn.close()

@@ -1,3 +1,4 @@
+import csv
 from config.database import get_db_connection
 
 class ReportService:
@@ -7,7 +8,6 @@ class ReportService:
         conn = get_db_connection()
         cursor = conn.cursor()
         try:
-            # Query class header details
             cursor.execute("""
                 SELECT s.subject_code, s.subject_name, co.section,
                        t.first_name || ' ' || t.last_name AS teacher_name, t.department,
@@ -19,9 +19,8 @@ class ReportService:
             """, (offering_id,))
             header = cursor.fetchone()
 
-            # Query enrolled students sorted ALPHABETICALLY by last name, then first name
             cursor.execute("""
-                SELECT st.student_id, st.last_name || ', ' || st.first_name AS student_name, st.program
+                SELECT st.student_id, st.last_name || ', ' || st.first_name AS student_name, st.program, st.email, e.status
                 FROM enrollment e
                 JOIN student st ON e.student_id = st.student_id
                 WHERE e.offering_id = %s AND e.status = 'Enrolled'
@@ -36,6 +35,10 @@ class ReportService:
         finally:
             cursor.close()
             conn.close()
+
+    def get_class_list(self, offering_id: str) -> dict:
+        """Alias for get_class_list_report to match GUI expectations."""
+        return self.get_class_list_report(offering_id)
 
     def get_class_grade_sheet(self, offering_id: str) -> dict:
         """Generates Grade Sheet (RP-02) with Grade Points (MG, FG) in Alphabetical Order."""
@@ -83,13 +86,12 @@ class ReportService:
             info = cursor.fetchone()
 
             cursor.execute("""
-                SELECT s.subject_code, s.subject_name,
-                       t.first_name || ' ' || t.last_name AS teacher_name,
-                       s.units, g.final_equiv
+                SELECT co.offering_id, s.subject_code, 
+                       COALESCE(g.period_id, 'Finals') AS period_id, 
+                       g.final_grade, g.remarks, s.units, g.final_equiv
                 FROM enrollment e
                 JOIN classoffering co ON e.offering_id = co.offering_id
                 JOIN subject s ON co.subject_id = s.subject_id
-                JOIN teacher t ON co.teacher_id = t.teacher_id
                 LEFT JOIN grade g ON e.enrollment_id = g.enrollment_id
                 WHERE e.student_id = %s AND e.status = 'Enrolled';
             """, (student_id,))
@@ -100,22 +102,21 @@ class ReportService:
             records = []
 
             for row in rows:
-                subj_code, desc, teacher, units, final_equiv = row
+                offering_id, subj_code, period_id, final_grade, remarks, units, final_equiv = row
 
                 fg_val = float(final_equiv) if final_equiv is not None else None
-                if fg_val is not None:
+                if fg_val is not None and units is not None:
                     total_units += units
                     total_weighted_points += (fg_val * units)
 
                 records.append({
+                    "offering_id": offering_id,
                     "subject_code": subj_code,
-                    "description": desc,
-                    "teacher": teacher,
-                    "units": units,
-                    "final_equiv": f"{fg_val:.2f}" if fg_val is not None else "N/A"
+                    "period_id": period_id,
+                    "final_grade": f"{float(final_grade):.2f}" if final_grade is not None else "N/A",
+                    "remarks": remarks if remarks else "N/A"
                 })
 
-            # Calculate exact GWA (Grade Weighted Average)
             gwa = round(total_weighted_points / total_units, 2) if total_units > 0 else 0.00
 
             return {
@@ -128,3 +129,14 @@ class ReportService:
         finally:
             cursor.close()
             conn.close()
+
+    def export_report_to_csv(self, filepath: str, headers: list, rows: list, title: str = ""):
+        """Exports any list of records and headers into a CSV file."""
+        with open(filepath, mode='w', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
+            if title:
+                writer.writerow([title])
+                writer.writerow([])
+            writer.writerow(headers)
+            for row in rows:
+                writer.writerow(row)
