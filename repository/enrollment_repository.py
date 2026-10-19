@@ -1,3 +1,4 @@
+import psycopg2
 from config.database import get_db_connection
 
 class EnrolmentRepository:
@@ -29,7 +30,6 @@ class EnrolmentRepository:
 
     def _ensure_default_subject(self, cursor, subject_code_or_id: str) -> str:
         """Finds an existing subject_id by ID or code, or safely inserts a unique record."""
-        # 1. Search if subject already exists by subject_id or subject_code
         cursor.execute(
             "SELECT subject_id FROM subject WHERE subject_id = %s OR subject_code = %s LIMIT 1;",
             (subject_code_or_id, subject_code_or_id)
@@ -38,12 +38,10 @@ class EnrolmentRepository:
         if subj_row:
             return subj_row['subject_id'] if isinstance(subj_row, dict) else subj_row[0]
 
-        # 2. Check if any subject exists in the table to use as fallback
         fallback_subj, _ = self._get_valid_fallback_ids(cursor)
         if fallback_subj:
             return fallback_subj
 
-        # 3. If subject table is completely empty, insert with ON CONFLICT resolution
         try:
             cursor.execute(
                 """
@@ -57,7 +55,6 @@ class EnrolmentRepository:
             res = cursor.fetchone()
             return res['subject_id'] if isinstance(res, dict) else res[0]
         except Exception:
-            # Fallback query to get any subject_id if insertion was bypassed
             cursor.execute("SELECT subject_id FROM subject LIMIT 1;")
             res = cursor.fetchone()
             return res['subject_id'] if isinstance(res, dict) else res[0]
@@ -132,14 +129,13 @@ class EnrolmentRepository:
 
             query = """
                 INSERT INTO enrollment (enrollment_id, student_id, offering_id, status, enrollment_date)
-                VALUES (%s, %s, %s, %s, CURRENT_DATE)
-                ON CONFLICT (enrollment_id) DO UPDATE SET
-                    student_id = EXCLUDED.student_id,
-                    offering_id = EXCLUDED.offering_id,
-                    status = EXCLUDED.status;
+                VALUES (%s, %s, %s, %s, CURRENT_DATE);
             """
             cursor.execute(query, (enrollment_id, student_id, offering_id, status))
             conn.commit()
+        except psycopg2.errors.UniqueViolation:
+            conn.rollback()
+            raise ValueError(f"Enrollment ID '{enrollment_id}' already exists!")
         except Exception as e:
             conn.rollback()
             raise e

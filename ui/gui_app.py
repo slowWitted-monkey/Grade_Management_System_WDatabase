@@ -31,9 +31,9 @@ class GradeManagementGUI(tk.Tk):
         # Instantiate grade_repository so self.grade_repository exists
         self.grade_repository = GradeRepository()
 
-        self.title("Student Grade Management System - NDMU CSPC 103")
-        self.geometry("1120x760")
-        self.minsize(920, 670)
+        self.title("LMSchoology - Advanced Student Grade Management System (PostgreSQL Connected)")
+        self.geometry("1160x780")
+        self.minsize(960, 680)
         self.configure(bg=self.BG_DARK)
 
         # Initialize Repositories and Services
@@ -50,33 +50,73 @@ class GradeManagementGUI(tk.Tk):
         # Build Header Container
         self._build_header()
 
-        # Navigation Tabs Notebook
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        # ==============================================================
+        # CATEGORIZED HIERARCHICAL NAVIGATION (NESTED NOTEBOOKS)
+        # ==============================================================
+        self.main_notebook = ttk.Notebook(self)
+        self.main_notebook.pack(fill="both", expand=True, padx=20, pady=(0, 20))
 
-        # Tab Frames
-        self.tab_student_mgmt = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.tab_teacher_mgmt = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.tab_enrollment = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.tab_grade_entry = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.tab_class_list = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.tab_grade_sheet = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.tab_student_report = ttk.Frame(self.notebook, style="Card.TFrame")
+        # Main Category Frames
+        self.tab_master = ttk.Frame(self.main_notebook, style="Card.TFrame")
+        self.tab_classes_enr = ttk.Frame(self.main_notebook, style="Card.TFrame")
+        self.tab_grading_scores = ttk.Frame(self.main_notebook, style="Card.TFrame")
+        self.tab_reports_main = ttk.Frame(self.main_notebook, style="Card.TFrame")
 
-        # Register Notebook Tabs
-        self.notebook.add(self.tab_student_mgmt, text="  Student Records  ")
-        self.notebook.add(self.tab_teacher_mgmt, text="  Teacher Records  ")
-        self.notebook.add(self.tab_enrollment, text="  Course Enrollment  ")
-        self.notebook.add(self.tab_grade_entry, text="  Grade Computation  ")
-        self.notebook.add(self.tab_class_list, text="  Class List Report  ")
-        self.notebook.add(self.tab_grade_sheet, text="  Class Grade Sheet  ")
-        self.notebook.add(self.tab_student_report, text="  Student Grade Report  ")
+        # Register Main Category Tabs
+        self.main_notebook.add(self.tab_master, text="  Master Records  ")
+        self.main_notebook.add(self.tab_classes_enr, text="  Classes & Enrollment  ")
+        self.main_notebook.add(self.tab_grading_scores, text="  Grading & Scores  ")
+        self.main_notebook.add(self.tab_reports_main, text="  Reports  ")
 
-        # Initialize Tab Layouts
+        # --- Sub-Tab 1: Master Records (Students, Teachers) ---
+        self.master_notebook = ttk.Notebook(self.tab_master)
+        self.master_notebook.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.sub_students = ttk.Frame(self.master_notebook, style="Card.TFrame")
+        self.sub_teachers = ttk.Frame(self.master_notebook, style="Card.TFrame")
+
+        self.master_notebook.add(self.sub_students, text=" Students ")
+        self.master_notebook.add(self.sub_teachers, text=" Teachers ")
+
+        # --- Sub-Tab 2: Classes & Enrollment ---
+        self.classes_notebook = ttk.Notebook(self.tab_classes_enr)
+        self.classes_notebook.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.sub_offerings = ttk.Frame(self.classes_notebook, style="Card.TFrame")
+        self.sub_enrollment = ttk.Frame(self.classes_notebook, style="Card.TFrame")
+
+        self.classes_notebook.add(self.sub_offerings, text=" Class Offerings ")
+        self.classes_notebook.add(self.sub_enrollment, text=" Student Enrollment ")
+
+        # --- Sub-Tab 3: Grading & Scores ---
+        self.grading_notebook = ttk.Notebook(self.tab_grading_scores)
+        self.grading_notebook.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.sub_comp_grade = ttk.Frame(self.grading_notebook, style="Card.TFrame")
+        self.sub_direct_grade = ttk.Frame(self.grading_notebook, style="Card.TFrame")
+
+        self.grading_notebook.add(self.sub_comp_grade, text=" Grade Computation ")
+        self.grading_notebook.add(self.sub_direct_grade, text=" Direct Grade Entry ")
+
+        # --- Sub-Tab 4: Reports ---
+        self.reports_notebook = ttk.Notebook(self.tab_reports_main)
+        self.reports_notebook.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.sub_rep_class_list = ttk.Frame(self.reports_notebook, style="Card.TFrame")
+        self.sub_rep_grade_sheet = ttk.Frame(self.reports_notebook, style="Card.TFrame")
+        self.sub_rep_student_report = ttk.Frame(self.reports_notebook, style="Card.TFrame")
+
+        self.reports_notebook.add(self.sub_rep_class_list, text=" Class List ")
+        self.reports_notebook.add(self.sub_rep_grade_sheet, text=" Class Grade Sheet ")
+        self.reports_notebook.add(self.sub_rep_student_report, text=" Student Report ")
+
+        # Initialize Layouts into their respective sub-containers
         self._setup_student_mgmt_tab()
         self._setup_teacher_mgmt_tab()
-        self._setup_enrollment_tab()
+        self._setup_offering_tab()
+        self._setup_enrollment_action_tab()
         self._setup_grade_entry_tab()
+        self._setup_direct_grade_tab()
         self._setup_class_list_tab()
         self._setup_grade_sheet_tab()
         self._setup_student_report_tab()
@@ -99,8 +139,8 @@ class GradeManagementGUI(tk.Tk):
         style.configure("Card.TLabelframe.Label", background=self.CARD_BG, foreground=self.TEXT_LIGHT, font=("Segoe UI", 10, "bold"))
 
         style.configure("TLabel", background=self.CARD_BG, foreground=self.TEXT_LIGHT, font=("Segoe UI", 10))
-        style.configure("Header.TLabel", background=self.BG_DARK, foreground=self.TEXT_LIGHT, font=("Segoe UI", 16, "bold"))
-        style.configure("SubHeader.TLabel", background=self.BG_DARK, foreground=self.TEXT_MUTED, font=("Segoe UI", 10))
+        style.configure("Header.TLabel", background=self.BG_DARK, foreground=self.TEXT_LIGHT, font=("Segoe UI", 15, "bold"))
+        style.configure("SubHeader.TLabel", background=self.BG_DARK, foreground=self.TEXT_MUTED, font=("Segoe UI", 9))
 
         style.configure("TEntry", fieldbackground=self.ENTRY_BG, foreground=self.TEXT_LIGHT, insertcolor=self.TEXT_LIGHT, borderwidth=1, relief="solid")
         style.configure("TCombobox", fieldbackground=self.ENTRY_BG, background=self.CARD_BG, foreground=self.TEXT_LIGHT, insertcolor=self.TEXT_LIGHT, borderwidth=1)
@@ -113,19 +153,19 @@ class GradeManagementGUI(tk.Tk):
         style.map("Danger.TButton", background=[("active", self.DANGER_HOVER)])
 
         style.configure("TNotebook", background=self.BG_DARK, borderwidth=0)
-        style.configure("TNotebook.Tab", background=self.CARD_BG, foreground=self.TEXT_MUTED, padding=(14, 8), font=("Segoe UI", 10, "bold"), borderwidth=0)
+        style.configure("TNotebook.Tab", background=self.CARD_BG, foreground=self.TEXT_MUTED, padding=(12, 6), font=("Segoe UI", 9, "bold"), borderwidth=0)
         style.map("TNotebook.Tab", background=[("selected", self.ACCENT_BLUE)], foreground=[("selected", "#FFFFFF")])
 
-        style.configure("Treeview", background=self.ENTRY_BG, foreground=self.TEXT_LIGHT, fieldbackground=self.ENTRY_BG, rowheight=30, font=("Segoe UI", 10), borderwidth=0)
+        style.configure("Treeview", background=self.ENTRY_BG, foreground=self.TEXT_LIGHT, fieldbackground=self.ENTRY_BG, rowheight=28, font=("Segoe UI", 10), borderwidth=0)
         style.configure("Treeview.Heading", background=self.CARD_BG, foreground=self.TEXT_LIGHT, font=("Segoe UI", 10, "bold"), borderwidth=0, padding=6)
         style.map("Treeview", background=[("selected", self.ACCENT_BLUE)], foreground=[("selected", "#FFFFFF")])
 
     def _build_header(self):
         header_frame = ttk.Frame(self)
-        header_frame.pack(fill="x", padx=20, pady=(15, 10))
+        header_frame.pack(fill="x", padx=20, pady=(12, 8))
 
-        ttk.Label(header_frame, text="Student Grade Management System", style="Header.TLabel").pack(anchor="w")
-        ttk.Label(header_frame, text="NDMU CSPC 103 Academic Administration Portal", style="SubHeader.TLabel").pack(anchor="w")
+        ttk.Label(header_frame, text="LMSchoology | Student Information & Grading System", style="Header.TLabel").pack(anchor="w")
+        ttk.Label(header_frame, text="Connected to PostgreSQL Database • Academic Administration Portal", style="SubHeader.TLabel").pack(anchor="w")
 
     # ------------------------------------------------------------------
     # DROPDOWN REFRESH HELPERS
@@ -135,21 +175,20 @@ class GradeManagementGUI(tk.Tk):
             students = self.student_repo.find_all()
             student_ids = [s.student_id for s in students] if students else []
 
-            self.cmb_enr_student['values'] = student_ids
-            self.cmb_man_student_id['values'] = student_ids
-            self.cmb_report_student_id['values'] = student_ids
+            if hasattr(self, 'cmb_enr_student'):
+                self.cmb_enr_student['values'] = student_ids
+            if hasattr(self, 'cmb_man_student_id'):
+                self.cmb_man_student_id['values'] = student_ids
+            if hasattr(self, 'cmb_report_student_id'):
+                self.cmb_report_student_id['values'] = student_ids
 
             if student_ids:
-                if not self.cmb_enr_student.get():
+                if hasattr(self, 'cmb_enr_student') and not self.cmb_enr_student.get():
                     self.cmb_enr_student.set(student_ids[0])
-                if not self.cmb_man_student_id.get():
+                if hasattr(self, 'cmb_man_student_id') and not self.cmb_man_student_id.get():
                     self.cmb_man_student_id.set(student_ids[0])
-                if not self.cmb_report_student_id.get():
+                if hasattr(self, 'cmb_report_student_id') and not self.cmb_report_student_id.get():
                     self.cmb_report_student_id.set(student_ids[0])
-            else:
-                self.cmb_enr_student.set("")
-                self.cmb_man_student_id.set("")
-                self.cmb_report_student_id.set("")
         except Exception as e:
             print(f"Error refreshing student dropdowns: {e}")
 
@@ -192,10 +231,10 @@ class GradeManagementGUI(tk.Tk):
             print(f"Error refreshing offering comboboxes: {e}")
 
     # ------------------------------------------------------------------
-    # TAB 1: STUDENT RECORDS MANAGEMENT
+    # TAB 1.1: STUDENTS MANAGEMENT (Master Records -> Students)
     # ------------------------------------------------------------------
     def _setup_student_mgmt_tab(self):
-        form_frame = ttk.LabelFrame(self.tab_student_mgmt, text=" Add / Update / Delete Student ", style="Card.TLabelframe")
+        form_frame = ttk.LabelFrame(self.sub_students, text=" Add / Update / Delete Student ", style="Card.TLabelframe")
         form_frame.pack(fill="x", padx=15, pady=15)
 
         form_grid = ttk.Frame(form_frame, style="Card.TFrame")
@@ -236,7 +275,7 @@ class GradeManagementGUI(tk.Tk):
         btn_delete = ttk.Button(btn_box, text="Delete Student", style="Danger.TButton", command=self._delete_student)
         btn_delete.pack(side="top", pady=2, fill="x")
 
-        table_frame = ttk.Frame(self.tab_student_mgmt, style="Card.TFrame")
+        table_frame = ttk.Frame(self.sub_students, style="Card.TFrame")
         table_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
         columns = ("student_id", "first_name", "last_name", "program", "email", "status")
@@ -323,15 +362,30 @@ class GradeManagementGUI(tk.Tk):
             messagebox.showwarning("Missing ID", "Please select or enter a Student ID to delete.")
             return
 
-        confirm = messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete student '{s_id}'?\nThis action cannot be undone.")
-        if not confirm:
-            return
-
         try:
+            # Check if student has active enrollments first (ST-07 Protection)
+            from config.database import get_db_connection
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM enrollment WHERE student_id = %s;", (s_id,))
+            enrollment_count = cursor.fetchone()[0]
+            cursor.close()
+            conn.close()
+
+            if enrollment_count > 0:
+                messagebox.showerror(
+                    "Deletion Blocked (ST-07)",
+                    f"Cannot delete Student '{s_id}' because they have active course enrollments and grade records.\n\nPlease remove their enrollments first if deletion is required."
+                )
+                return
+
+            confirm = messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete student '{s_id}'?\nThis action cannot be undone.")
+            if not confirm:
+                return
+
             if hasattr(self.student_repo, 'delete'):
                 self.student_repo.delete(s_id)
             else:
-                from config.database import get_db_connection
                 conn = get_db_connection()
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM student WHERE student_id = %s;", (s_id,))
@@ -359,10 +413,10 @@ class GradeManagementGUI(tk.Tk):
             self.tree_students.insert("", "end", values=(s.student_id, s.first_name, s.last_name, s.program, s.email, s.status))
 
     # ------------------------------------------------------------------
-    # TAB 2: TEACHER RECORDS MANAGEMENT
+    # TAB 1.2: TEACHER RECORDS MANAGEMENT (Master Records -> Teachers)
     # ------------------------------------------------------------------
     def _setup_teacher_mgmt_tab(self):
-        form_frame = ttk.LabelFrame(self.tab_teacher_mgmt, text=" Add / Update Teacher Record ", style="Card.TLabelframe")
+        form_frame = ttk.LabelFrame(self.sub_teachers, text=" Add / Update Teacher Record ", style="Card.TLabelframe")
         form_frame.pack(fill="x", padx=15, pady=15)
 
         form_grid = ttk.Frame(form_frame, style="Card.TFrame")
@@ -392,7 +446,7 @@ class GradeManagementGUI(tk.Tk):
         btn_save_tch = ttk.Button(form_grid, text="Save Teacher", style="Primary.TButton", command=self._save_teacher)
         btn_save_tch.grid(row=1, column=5, padx=12, pady=8, sticky="e")
 
-        table_frame = ttk.Frame(self.tab_teacher_mgmt, style="Card.TFrame")
+        table_frame = ttk.Frame(self.sub_teachers, style="Card.TFrame")
         table_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
         columns = ("teacher_id", "first_name", "last_name", "email", "department")
@@ -472,17 +526,14 @@ class GradeManagementGUI(tk.Tk):
             print("Error loading teachers table:", e)
 
     # ------------------------------------------------------------------
-    # TAB 3: COURSE ENROLLMENT & DIRECT GRADE ENTRY
+    # TAB 2.1: CLASS OFFERINGS (Classes & Enrollment -> Class Offerings)
     # ------------------------------------------------------------------
-    def _setup_enrollment_tab(self):
-        offering_options = ["OFF001", "OFF002", "OFF003", "OFF004"]
-
-        # Section A: Assign Teacher & Create Class Offering
-        offering_frame = ttk.LabelFrame(self.tab_enrollment, text=" Assign Teacher to Class Offering ", style="Card.TLabelframe")
-        offering_frame.pack(fill="x", padx=15, pady=10)
+    def _setup_offering_tab(self):
+        offering_frame = ttk.LabelFrame(self.sub_offerings, text=" Assign Teacher to Class Offering ", style="Card.TLabelframe")
+        offering_frame.pack(fill="x", padx=15, pady=20)
 
         grid_o = ttk.Frame(offering_frame, style="Card.TFrame")
-        grid_o.pack(padx=15, pady=10, fill="x")
+        grid_o.pack(padx=20, pady=20, fill="x")
 
         ttk.Label(grid_o, text="Offering ID:").grid(row=0, column=0, padx=8, pady=8, sticky="w")
         self.ent_offering_id = ttk.Entry(grid_o, width=15)
@@ -490,7 +541,7 @@ class GradeManagementGUI(tk.Tk):
         self.ent_offering_id.grid(row=0, column=1, padx=8, pady=8)
 
         ttk.Label(grid_o, text="Assigned Teacher:").grid(row=0, column=2, padx=8, pady=8, sticky="w")
-        self.cmb_offering_teacher = ttk.Combobox(grid_o, width=25, state="readonly")
+        self.cmb_offering_teacher = ttk.Combobox(grid_o, width=28, state="readonly")
         self.cmb_offering_teacher.grid(row=0, column=3, padx=8, pady=8)
 
         ttk.Label(grid_o, text="Subject Code:").grid(row=0, column=4, padx=8, pady=8, sticky="w")
@@ -499,14 +550,19 @@ class GradeManagementGUI(tk.Tk):
         self.ent_offering_subject.grid(row=0, column=5, padx=8, pady=8)
 
         btn_save_offering = ttk.Button(grid_o, text="Save Offering", style="Primary.TButton", command=self._save_offering_action)
-        btn_save_offering.grid(row=0, column=6, padx=12, pady=8)
+        btn_save_offering.grid(row=0, column=6, padx=15, pady=8)
 
-        # Section B: Enroll Student
-        enroll_frame = ttk.LabelFrame(self.tab_enrollment, text=" Enroll Student in Course Offering ", style="Card.TLabelframe")
-        enroll_frame.pack(fill="x", padx=15, pady=10)
+    # ------------------------------------------------------------------
+    # TAB 2.2: STUDENT ENROLLMENT (Classes & Enrollment -> Student Enrollment)
+    # ------------------------------------------------------------------
+    def _setup_enrollment_action_tab(self):
+        offering_options = ["OFF001", "OFF002", "OFF003", "OFF004"]
+
+        enroll_frame = ttk.LabelFrame(self.sub_enrollment, text=" Enroll Student in Course Offering ", style="Card.TLabelframe")
+        enroll_frame.pack(fill="x", padx=15, pady=20)
 
         grid_e = ttk.Frame(enroll_frame, style="Card.TFrame")
-        grid_e.pack(padx=15, pady=10, fill="x")
+        grid_e.pack(padx=20, pady=20, fill="x")
 
         ttk.Label(grid_e, text="Enrollment ID:").grid(row=0, column=0, padx=8, pady=8, sticky="w")
         self.ent_enr_id = ttk.Entry(grid_e, width=15)
@@ -514,55 +570,16 @@ class GradeManagementGUI(tk.Tk):
         self.ent_enr_id.grid(row=0, column=1, padx=8, pady=8)
 
         ttk.Label(grid_e, text="Student ID:").grid(row=0, column=2, padx=8, pady=8, sticky="w")
-        self.cmb_enr_student = ttk.Combobox(grid_e, width=13)
+        self.cmb_enr_student = ttk.Combobox(grid_e, width=18)
         self.cmb_enr_student.grid(row=0, column=3, padx=8, pady=8)
 
         ttk.Label(grid_e, text="Offering ID:").grid(row=0, column=4, padx=8, pady=8, sticky="w")
-        self.cmb_enr_offering = ttk.Combobox(grid_e, width=13, values=offering_options)
+        self.cmb_enr_offering = ttk.Combobox(grid_e, width=15, values=offering_options)
         self.cmb_enr_offering.set("OFF001")
         self.cmb_enr_offering.grid(row=0, column=5, padx=8, pady=8)
 
         btn_enroll = ttk.Button(grid_e, text="Enroll Student", style="Primary.TButton", command=self._enroll_student_action)
-        btn_enroll.grid(row=0, column=6, padx=12, pady=8)
-
-        # Section C: Direct Grade Update
-        grade_frame = ttk.LabelFrame(self.tab_enrollment, text=" Directly Add / Update Student Grade ", style="Card.TLabelframe")
-        grade_frame.pack(fill="x", padx=15, pady=10)
-
-        grid_g = ttk.Frame(grade_frame, style="Card.TFrame")
-        grid_g.pack(padx=15, pady=10, fill="x")
-
-        ttk.Label(grid_g, text="Grade Record ID:").grid(row=0, column=0, padx=8, pady=8, sticky="w")
-        self.ent_man_grade_id = ttk.Entry(grid_g, width=15)
-        self.ent_man_grade_id.insert(0, "GRD003")
-        self.ent_man_grade_id.grid(row=0, column=1, padx=8, pady=8)
-
-        ttk.Label(grid_g, text="Student ID:").grid(row=0, column=2, padx=8, pady=8, sticky="w")
-        self.cmb_man_student_id = ttk.Combobox(grid_g, width=13)
-        self.cmb_man_student_id.grid(row=0, column=3, padx=8, pady=8)
-
-        ttk.Label(grid_g, text="Offering ID:").grid(row=0, column=4, padx=8, pady=8, sticky="w")
-        self.cmb_man_offering_id = ttk.Combobox(grid_g, width=13, values=offering_options)
-        self.cmb_man_offering_id.set("OFF001")
-        self.cmb_man_offering_id.grid(row=0, column=5, padx=8, pady=8)
-
-        ttk.Label(grid_g, text="Period Name:").grid(row=1, column=0, padx=8, pady=8, sticky="w")
-        self.cmb_man_period = ttk.Combobox(grid_g, width=13, values=["Midterm", "Finals", "Prelim", "Semi-Final"])
-        self.cmb_man_period.set("Finals")
-        self.cmb_man_period.grid(row=1, column=1, padx=8, pady=8)
-
-        ttk.Label(grid_g, text="Final Grade (%):").grid(row=1, column=2, padx=8, pady=8, sticky="w")
-        self.ent_man_score = ttk.Entry(grid_g, width=15)
-        self.ent_man_score.insert(0, "92.5")
-        self.ent_man_score.grid(row=1, column=3, padx=8, pady=8)
-
-        ttk.Label(grid_g, text="Remarks:").grid(row=1, column=4, padx=8, pady=8, sticky="w")
-        self.cmb_man_remarks = ttk.Combobox(grid_g, width=13, values=["Passed", "Failed", "Incomplete", "Dropped"])
-        self.cmb_man_remarks.set("Passed")
-        self.cmb_man_remarks.grid(row=1, column=5, padx=8, pady=8)
-
-        btn_save_grade = ttk.Button(grid_g, text="Save Grade", style="Primary.TButton", command=self._save_direct_grade_action)
-        btn_save_grade.grid(row=1, column=6, padx=12, pady=8)
+        btn_enroll.grid(row=0, column=6, padx=15, pady=8)
 
     def _save_offering_action(self):
         off_id = self.ent_offering_id.get().strip()
@@ -620,50 +637,11 @@ class GradeManagementGUI(tk.Tk):
         except Exception as e:
             messagebox.showerror("Enrollment Error", str(e))
 
-    def _save_direct_grade_action(self):
-        grade_id = self.ent_man_grade_id.get().strip()
-        std_id = self.cmb_man_student_id.get().strip()
-        off_id = self.cmb_man_offering_id.get().strip()
-        period = self.cmb_man_period.get().strip()
-
-        try:
-            score = float(self.ent_man_score.get().strip())
-        except ValueError:
-            messagebox.showwarning("Invalid Score", "Please enter a valid numeric grade percentage.")
-            return
-
-        remarks = self.cmb_man_remarks.get().strip()
-
-        try:
-            from config.database import get_db_connection
-            conn = get_db_connection()
-            cursor = conn.cursor()
-
-            # Find the enrollment_id linking this student to the course offering
-            cursor.execute("SELECT enrollment_id FROM enrollment WHERE student_id = %s AND offering_id = %s;", (std_id, off_id))
-            row = cursor.fetchone()
-
-            # Map period name to period_id
-            period_id = 'PRD002' if period.lower() in ['finals', 'final'] else 'PRD001'
-
-            if not row:
-                raise ValueError(f"No active enrollment found for Student '{std_id}' in Offering '{off_id}'. Please enroll them first.")
-
-            enrollment_id = row[0]
-            cursor.close()
-            conn.close()
-
-            # Save via grade repository
-            self.grade_repo.save_or_update_grade(grade_id, enrollment_id, period_id, score, remarks)
-            messagebox.showinfo("Success", f"Grade record '{grade_id}' updated successfully for student '{std_id}'!")
-        except Exception as e:
-            messagebox.showerror("Grade Error", str(e))
-
     # ------------------------------------------------------------------
-    # TAB 4: GRADE COMPUTATION
+    # TAB 3.1: GRADE COMPUTATION (Grading & Scores -> Grade Computation)
     # ------------------------------------------------------------------
     def _setup_grade_entry_tab(self):
-        frame = ttk.LabelFrame(self.tab_grade_entry, text=" Compute & Save Period Grade ", style="Card.TLabelframe")
+        frame = ttk.LabelFrame(self.sub_comp_grade, text=" Compute & Save Period Grade ", style="Card.TLabelframe")
         frame.pack(padx=30, pady=30, fill="x")
 
         inner_frame = ttk.Frame(frame, style="Card.TFrame")
@@ -690,10 +668,7 @@ class GradeManagementGUI(tk.Tk):
         offering_id = self.cmb_offering_id_calc.get().strip()
 
         try:
-            # Fetch student_id associated with this grade_id first
             student_id = self.grade_repository.get_student_id_by_grade_id(grade_id)
-
-            # Pass all 3 arguments: grade_id, student_id, offering_id
             res = self.grading_service.calculate_and_save_period_grade(grade_id, student_id, offering_id)
 
             self.lbl_calc_result.config(text=f"Success! Calculated Final Grade: {res:.2f}%", foreground="#10B981")
@@ -703,10 +678,89 @@ class GradeManagementGUI(tk.Tk):
             messagebox.showerror(title="Calculation Error", message=str(e))
 
     # ------------------------------------------------------------------
-    # TAB 5: CLASS LIST REPORT
+    # TAB 3.2: DIRECT GRADE ENTRY (Grading & Scores -> Direct Grade Entry)
+    # ------------------------------------------------------------------
+    def _setup_direct_grade_tab(self):
+        offering_options = ["OFF001", "OFF002", "OFF003", "OFF004"]
+        grade_frame = ttk.LabelFrame(self.sub_direct_grade, text=" Directly Add / Update Student Grade ", style="Card.TLabelframe")
+        grade_frame.pack(fill="x", padx=15, pady=20)
+
+        grid_g = ttk.Frame(grade_frame, style="Card.TFrame")
+        grid_g.pack(padx=20, pady=20, fill="x")
+
+        ttk.Label(grid_g, text="Grade Record ID:").grid(row=0, column=0, padx=8, pady=8, sticky="w")
+        self.ent_man_grade_id = ttk.Entry(grid_g, width=15)
+        self.ent_man_grade_id.insert(0, "GRD003")
+        self.ent_man_grade_id.grid(row=0, column=1, padx=8, pady=8)
+
+        ttk.Label(grid_g, text="Student ID:").grid(row=0, column=2, padx=8, pady=8, sticky="w")
+        self.cmb_man_student_id = ttk.Combobox(grid_g, width=15)
+        self.cmb_man_student_id.grid(row=0, column=3, padx=8, pady=8)
+
+        ttk.Label(grid_g, text="Offering ID:").grid(row=0, column=4, padx=8, pady=8, sticky="w")
+        self.cmb_man_offering_id = ttk.Combobox(grid_g, width=15, values=offering_options)
+        self.cmb_man_offering_id.set("OFF001")
+        self.cmb_man_offering_id.grid(row=0, column=5, padx=8, pady=8)
+
+        ttk.Label(grid_g, text="Period Name:").grid(row=1, column=0, padx=8, pady=8, sticky="w")
+        self.cmb_man_period = ttk.Combobox(grid_g, width=15, values=["Midterm", "Finals", "Prelim", "Semi-Final"])
+        self.cmb_man_period.set("Finals")
+        self.cmb_man_period.grid(row=1, column=1, padx=8, pady=8)
+
+        ttk.Label(grid_g, text="Final Grade (%):").grid(row=1, column=2, padx=8, pady=8, sticky="w")
+        self.ent_man_score = ttk.Entry(grid_g, width=15)
+        self.ent_man_score.insert(0, "92.5")
+        self.ent_man_score.grid(row=1, column=3, padx=8, pady=8)
+
+        ttk.Label(grid_g, text="Remarks:").grid(row=1, column=4, padx=8, pady=8, sticky="w")
+        self.cmb_man_remarks = ttk.Combobox(grid_g, width=15, values=["Passed", "Failed", "Incomplete", "Dropped"])
+        self.cmb_man_remarks.set("Passed")
+        self.cmb_man_remarks.grid(row=1, column=5, padx=8, pady=8)
+
+        btn_save_grade = ttk.Button(grid_g, text="Save Grade", style="Primary.TButton", command=self._save_direct_grade_action)
+        btn_save_grade.grid(row=1, column=6, padx=15, pady=8)
+
+    def _save_direct_grade_action(self):
+        grade_id = self.ent_man_grade_id.get().strip()
+        std_id = self.cmb_man_student_id.get().strip()
+        off_id = self.cmb_man_offering_id.get().strip()
+        period = self.cmb_man_period.get().strip()
+
+        try:
+            score = float(self.ent_man_score.get().strip())
+        except ValueError:
+            messagebox.showwarning("Invalid Score", "Please enter a valid numeric grade percentage.")
+            return
+
+        remarks = self.cmb_man_remarks.get().strip()
+
+        try:
+            from config.database import get_db_connection
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT enrollment_id FROM enrollment WHERE student_id = %s AND offering_id = %s;", (std_id, off_id))
+            row = cursor.fetchone()
+
+            period_id = 'PRD002' if period.lower() in ['finals', 'final'] else 'PRD001'
+
+            if not row:
+                raise ValueError(f"No active enrollment found for Student '{std_id}' in Offering '{off_id}'. Please enroll them first.")
+
+            enrollment_id = row[0]
+            cursor.close()
+            conn.close()
+
+            self.grade_repo.save_or_update_grade(grade_id, enrollment_id, period_id, score, remarks)
+            messagebox.showinfo("Success", f"Grade record '{grade_id}' updated successfully for student '{std_id}'!")
+        except Exception as e:
+            messagebox.showerror("Grade Error", str(e))
+
+    # ------------------------------------------------------------------
+    # TAB 4.1: CLASS LIST REPORT (Reports -> Class List)
     # ------------------------------------------------------------------
     def _setup_class_list_tab(self):
-        filter_frame = ttk.Frame(self.tab_class_list, style="Card.TFrame")
+        filter_frame = ttk.Frame(self.sub_rep_class_list, style="Card.TFrame")
         filter_frame.pack(fill="x", padx=15, pady=15)
 
         ttk.Label(filter_frame, text="Select Offering ID:").pack(side="left", padx=8)
@@ -716,7 +770,7 @@ class GradeManagementGUI(tk.Tk):
         btn_fetch = ttk.Button(filter_frame, text="Generate Class List", style="Primary.TButton", command=self._generate_class_list)
         btn_fetch.pack(side="left", padx=12)
 
-        table_frame = ttk.Frame(self.tab_class_list, style="Card.TFrame")
+        table_frame = ttk.Frame(self.sub_rep_class_list, style="Card.TFrame")
         table_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
         columns = ("student_id", "name", "program", "email", "status")
@@ -764,10 +818,10 @@ class GradeManagementGUI(tk.Tk):
             messagebox.showerror("Report Error", str(e))
 
     # ------------------------------------------------------------------
-    # TAB 6: CLASS GRADE SHEET
+    # TAB 4.2: CLASS GRADE SHEET (Reports -> Class Grade Sheet)
     # ------------------------------------------------------------------
     def _setup_grade_sheet_tab(self):
-        filter_frame = ttk.Frame(self.tab_grade_sheet, style="Card.TFrame")
+        filter_frame = ttk.Frame(self.sub_rep_grade_sheet, style="Card.TFrame")
         filter_frame.pack(fill="x", padx=15, pady=15)
 
         ttk.Label(filter_frame, text="Select Offering ID:").pack(side="left", padx=8)
@@ -777,7 +831,7 @@ class GradeManagementGUI(tk.Tk):
         btn_fetch = ttk.Button(filter_frame, text="Generate Grade Sheet", style="Primary.TButton", command=self._generate_grade_sheet)
         btn_fetch.pack(side="left", padx=12)
 
-        table_frame = ttk.Frame(self.tab_grade_sheet, style="Card.TFrame")
+        table_frame = ttk.Frame(self.sub_rep_grade_sheet, style="Card.TFrame")
         table_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
         columns = ("student_id", "name", "period", "final_grade", "remarks")
@@ -828,10 +882,10 @@ class GradeManagementGUI(tk.Tk):
             messagebox.showerror("Report Error", str(e))
 
     # ------------------------------------------------------------------
-    # TAB 7: STUDENT GRADE REPORT
+    # TAB 4.3: STUDENT GRADE REPORT (Reports -> Student Report)
     # ------------------------------------------------------------------
     def _setup_student_report_tab(self):
-        filter_frame = ttk.Frame(self.tab_student_report, style="Card.TFrame")
+        filter_frame = ttk.Frame(self.sub_rep_student_report, style="Card.TFrame")
         filter_frame.pack(fill="x", padx=15, pady=15)
 
         ttk.Label(filter_frame, text="Select Student ID:").pack(side="left", padx=8)
@@ -841,7 +895,7 @@ class GradeManagementGUI(tk.Tk):
         btn_fetch = ttk.Button(filter_frame, text="Generate Student Report", style="Primary.TButton", command=self._generate_student_report)
         btn_fetch.pack(side="left", padx=12)
 
-        table_frame = ttk.Frame(self.tab_student_report, style="Card.TFrame")
+        table_frame = ttk.Frame(self.sub_rep_student_report, style="Card.TFrame")
         table_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
         columns = ("offering_id", "subject_code", "period", "final_grade", "remarks")
@@ -889,8 +943,3 @@ class GradeManagementGUI(tk.Tk):
                 ))
         except Exception as e:
             messagebox.showerror("Report Error", str(e))
-
-
-if __name__ == "__main__":
-    app = GradeManagementGUI()
-    app.mainloop()
