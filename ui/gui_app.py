@@ -122,7 +122,7 @@ class GradeManagementGUI(ctk.CTk):
             button = ctk.CTkButton(
                 nav, text=label, anchor="w", height=38, corner_radius=9,
                 fg_color="transparent", hover_color=self.CARD_HOVER,
-                text_color=self.MUTED, font=ctk.CTkFont(size=12, weight="medium"),
+                text_color=self.MUTED, font=ctk.CTkFont(size=12, weight="normal"),
                 command=lambda target=key: self.navigate(target),
             )
             button.pack(fill="x", pady=2)
