@@ -621,26 +621,43 @@ class GradeManagementGUI(tk.Tk):
             messagebox.showerror("Enrollment Error", str(e))
 
     def _save_direct_grade_action(self):
-            grade_id = self.ent_man_grade_id.get().strip()
-            std_id = self.cmb_man_student_id.get().strip()
-            off_id = self.cmb_man_offering_id.get().strip()
-            period = self.cmb_man_period.get().strip()
+        grade_id = self.ent_man_grade_id.get().strip()
+        std_id = self.cmb_man_student_id.get().strip()
+        off_id = self.cmb_man_offering_id.get().strip()
+        period = self.cmb_man_period.get().strip()
 
-            try:
-                score = float(self.ent_man_score.get().strip())
-            except ValueError:
-                messagebox.showwarning("Invalid Score", "Please enter a valid numeric grade percentage.")
-                return
+        try:
+            score = float(self.ent_man_score.get().strip())
+        except ValueError:
+            messagebox.showwarning("Invalid Score", "Please enter a valid numeric grade percentage.")
+            return
 
-            remarks = self.cmb_man_remarks.get().strip()
+        remarks = self.cmb_man_remarks.get().strip()
 
-            try:
-                # Pass std_id, off_id, and period_id to your repository layer
-                # ensure grade_repo maps std_id + off_id -> enrollment_id internally
-                self.grade_repo.save_or_update_grade(grade_id, std_id, off_id, period, score, remarks)
-                messagebox.showinfo("Success", f"Grade record '{grade_id}' updated successfully for student '{std_id}'!")
-            except Exception as e:
-                messagebox.showerror("Grade Error", str(e))
+        try:
+            from config.database import get_db_connection
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            # Find the enrollment_id linking this student to the course offering
+            cursor.execute("SELECT enrollment_id FROM enrollment WHERE student_id = %s AND offering_id = %s;", (std_id, off_id))
+            row = cursor.fetchone()
+
+            # Map period name to period_id
+            period_id = 'PRD002' if period.lower() in ['finals', 'final'] else 'PRD001'
+
+            if not row:
+                raise ValueError(f"No active enrollment found for Student '{std_id}' in Offering '{off_id}'. Please enroll them first.")
+
+            enrollment_id = row[0]
+            cursor.close()
+            conn.close()
+
+            # Save via grade repository
+            self.grade_repo.save_or_update_grade(grade_id, enrollment_id, period_id, score, remarks)
+            messagebox.showinfo("Success", f"Grade record '{grade_id}' updated successfully for student '{std_id}'!")
+        except Exception as e:
+            messagebox.showerror("Grade Error", str(e))
 
     # ------------------------------------------------------------------
     # TAB 4: GRADE COMPUTATION
