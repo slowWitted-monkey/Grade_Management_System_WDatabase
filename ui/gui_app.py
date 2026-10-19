@@ -288,6 +288,81 @@ class GradeManagementGUI(ctk.CTk):
         finally:
             conn.close()
 
+    def _reference_options(self, kind):
+        """Return database-backed (stored value, display label) choices."""
+        queries = {
+            "student": """SELECT student_id, student_id || ' — ' || first_name || ' ' || last_name
+                FROM student ORDER BY last_name, first_name""",
+            "teacher": """SELECT teacher_id, teacher_id || ' — ' || first_name || ' ' || last_name
+                FROM teacher ORDER BY last_name, first_name""",
+            "subject": """SELECT subject_id, subject_code || ' — ' || subject_name
+                FROM subject ORDER BY subject_code""",
+            "class": """SELECT co.class_id, co.class_code || ' — ' || s.subject_code || ' / Section ' || co.section
+                || ' / ' || co.school_year || ' ' || co.semester
+                FROM class_offering co JOIN subject s USING(subject_id) ORDER BY co.class_code""",
+            "period": """SELECT period_id, name || ' — ' || school_year || ' ' || semester
+                FROM grading_period ORDER BY school_year, semester, period_order""",
+            "component": """SELECT gc.component_id, gc.component_id::text || ' — ' || gc.name || ' / ' || gp.name || ' (' || gc.max_score || ' max)'
+                FROM grade_component gc JOIN grading_period gp USING(period_id)
+                ORDER BY gp.school_year, gp.semester, gp.period_order, gc.component_id""",
+            "enrollment": """SELECT e.enrollment_id, e.enrollment_id::text || ' — ' || st.student_id || ' '
+                || st.first_name || ' ' || st.last_name || ' / ' || co.class_code
+                FROM enrollment e JOIN student st USING(student_id)
+                JOIN class_offering co USING(class_id) ORDER BY st.last_name, st.first_name, co.class_code""",
+        }
+        if kind in {"active_class"}:
+            query = queries["class"].replace("FROM class_offering co JOIN subject s USING(subject_id)",
+                "FROM class_offering co JOIN subject s USING(subject_id) WHERE EXISTS "
+                "(SELECT 1 FROM enrollment e WHERE e.class_id=co.class_id AND e.status='Enrolled')")
+        else:
+            query = queries.get(kind)
+        if not query:
+            return []
+        try:
+            return [(str(value), str(label)) for value, label in self._query(query)]
+        except Exception:
+            return []
+
+    def _choice_definitions(self, table):
+        """Map form fields to database choices or fixed, validated options."""
+        foreign_keys = {
+            ("class_offering", "subject_id"): "subject",
+            ("class_offering", "teacher_id"): "teacher",
+            ("enrollment", "student_id"): "student",
+            ("enrollment", "class_id"): "class",
+            ("grade_component", "period_id"): "period",
+        }
+        definitions = {}
+        for (owner, field), reference in foreign_keys.items():
+            if owner == table:
+                definitions[field] = self._reference_options(reference)
+        if table in {"student", "teacher"}:
+            definitions["status"] = [("Active", "Active"), ("Inactive", "Inactive")]
+        elif table == "enrollment":
+            definitions["status"] = [("Enrolled", "Enrolled"), ("Dropped", "Dropped"), ("Completed", "Completed")]
+        elif table == "grade_component":
+            definitions["type"] = [(value, value) for value in ("Quiz", "Assignment", "Laboratory", "Project", "Exam", "Other")]
+        elif table == "class_offering":
+            definitions["semester"] = [("1st", "1st Semester"), ("2nd", "2nd Semester"), ("Summer", "Summer")]
+        if table == "student":
+            definitions["year_level"] = [(str(n), f"{n} — {n}{'st' if n == 1 else 'nd' if n == 2 else 'rd' if n == 3 else 'th'} year") for n in range(1, 9)]
+        return definitions
+
+    def _make_combo(self, parent, options, *, default=None, width=None, height=35):
+        """Create a dropdown and a display-label-to-stored-value map."""
+        label_to_value = {label: value for value, label in options}
+        placeholder = "Choose an available record"
+        values = [placeholder] + list(label_to_value)
+        combo = ctk.CTkComboBox(
+            parent, values=values, state="readonly", height=height,
+            width=width or 220, fg_color="#0e1729", border_color=self.BORDER,
+            button_color=self.BLUE, dropdown_fg_color=self.PANEL,
+        )
+        label_to_value[placeholder] = None
+        chosen = next((label for value, label in options if str(value) == str(default)), placeholder)
+        combo.set(chosen)
+        return combo, label_to_value
+
     def check_database(self):
         try:
             conn = self._db()
@@ -343,6 +418,8 @@ class GradeManagementGUI(ctk.CTk):
         for col in range(column_count):
             grid.grid_columnconfigure(col, weight=1, uniform="fields")
         widgets = {}
+        choice_maps = {}
+        choice_definitions = self._choice_definitions(table)
         auto_keys = {"subject_id", "class_id", "enrollment_id", "period_id", "component_id"}
         field_defaults = {
             "student": {"status": "Active"},
@@ -359,11 +436,15 @@ class GradeManagementGUI(ctk.CTk):
             ctk.CTkLabel(cell, text=label, text_color=self.MUTED,
                          font=ctk.CTkFont(size=10, weight="bold"))\
                 .pack(anchor="w", padx=2, pady=(0, 5))
-            entry = ctk.CTkEntry(cell, height=35, corner_radius=8,
-                                 fg_color="#0e1729", border_color=self.BORDER,
-                                 text_color=self.TEXT, placeholder_text="Enter " + field.replace("_", " "))
+            if field in choice_definitions:
+                entry, choice_maps[field] = self._make_combo(
+                    cell, choice_definitions[field], default=field_defaults.get(field), height=35)
+            else:
+                entry = ctk.CTkEntry(cell, height=35, corner_radius=8,
+                                     fg_color="#0e1729", border_color=self.BORDER,
+                                     text_color=self.TEXT, placeholder_text="Enter " + field.replace("_", " "))
             entry.pack(fill="x")
-            if field in field_defaults:
+            if field in field_defaults and field not in choice_maps:
                 entry.insert(0, field_defaults[field])
             if field == key and field in auto_keys:
                 entry.configure(state="disabled", placeholder_text="Generated by database")
@@ -390,6 +471,11 @@ class GradeManagementGUI(ctk.CTk):
 
         def set_field(field, value):
             widget = widgets[field]
+            if field in choice_maps:
+                display = next((label for label, raw in choice_maps[field].items()
+                                if raw is not None and str(raw) == str(value)), "Choose an available record")
+                widget.set(display)
+                return
             disabled = str(widget.cget("state")) == "disabled"
             if disabled:
                 widget.configure(state="normal")
@@ -424,6 +510,9 @@ class GradeManagementGUI(ctk.CTk):
             for field in fields:
                 value = widgets[field].get().strip()
                 if field == key and field in auto_keys:
+                    continue
+                if field in choice_maps:
+                    data[field] = choice_maps[field].get(value)
                     continue
                 data[field] = value or None
             return data
@@ -504,8 +593,7 @@ class GradeManagementGUI(ctk.CTk):
         row = ctk.CTkFrame(card, fg_color="transparent")
         row.pack(fill="x", padx=14, pady=(6, 14))
         ctk.CTkLabel(row, text="Class ID", text_color=self.MUTED).pack(side="left", padx=(0, 9))
-        class_id = ctk.CTkEntry(row, width=160, height=36, placeholder_text="e.g. 1",
-                                fg_color="#0e1729", border_color=self.BORDER)
+        class_id, class_choices = self._make_combo(row, self._reference_options("class"), width=290, height=36)
         class_id.pack(side="left", padx=(0, 10))
         list_card = self._card(page, "COMPONENT WEIGHTS")
         list_card.pack(fill="both", expand=True)
@@ -517,9 +605,9 @@ class GradeManagementGUI(ctk.CTk):
             for child in area.winfo_children():
                 child.destroy()
             entries.clear()
-            class_value = class_id.get().strip()
+            class_value = class_choices.get(class_id.get())
             if not class_value:
-                raise ValueError("Enter a class ID first.")
+                raise ValueError("Choose a class first.")
             rows = self._query("""SELECT gc.component_id,gc.name,gp.name,gp.period_id,COALESCE(w.percentage,0)
                 FROM grade_component gc JOIN grading_period gp USING(period_id)
                 LEFT JOIN grade_percentage w ON w.component_id=gc.component_id AND w.class_id=%s
@@ -544,7 +632,7 @@ class GradeManagementGUI(ctk.CTk):
             if not entries:
                 load()
             self.grading_service.update_grading_weights(
-                class_id.get().strip(), {cid: entry.get().strip() for cid, entry in entries.items()})
+                str(class_choices[class_id.get()]), {cid: entry.get().strip() for cid, entry in entries.items()})
             messagebox.showinfo("Weights saved", "The grading weights have been saved.", parent=self)
 
         self._button(row, "Load components", load, self.BLUE).pack(side="left", padx=4)
@@ -564,12 +652,20 @@ class GradeManagementGUI(ctk.CTk):
         specs = [("enrollment_id", "Enrollment ID"), ("component_id", "Component ID"),
                  ("score", "Score earned"), ("remarks", "Remarks (optional)")]
         entries = {}
+        score_choice_maps = {}
         for col, (field, label) in enumerate(specs):
             form.grid_columnconfigure(col, weight=1, uniform="score")
             ctk.CTkLabel(form, text=label, text_color=self.MUTED,
                          font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=col, sticky="w", padx=6, pady=(3, 5))
-            entry = ctk.CTkEntry(form, height=38, fg_color="#0e1729", border_color=self.BORDER,
-                                 placeholder_text="Enter " + label.lower())
+            if field == "enrollment_id":
+                entry, score_choice_maps[field] = self._make_combo(
+                    form, self._reference_options("enrollment"), height=38)
+            elif field == "component_id":
+                entry, score_choice_maps[field] = self._make_combo(
+                    form, self._reference_options("component"), height=38)
+            else:
+                entry = ctk.CTkEntry(form, height=38, fg_color="#0e1729", border_color=self.BORDER,
+                                     placeholder_text="Enter " + label.lower())
             entry.grid(row=1, column=col, sticky="ew", padx=6)
             entries[field] = entry
         ctk.CTkLabel(card, text="Scores must be within the component’s maximum. The system checks enrollment, class, period, and weight.",
@@ -577,12 +673,12 @@ class GradeManagementGUI(ctk.CTk):
             .pack(anchor="w", padx=22, pady=(0, 12))
 
         def save():
-            enrollment = entries["enrollment_id"].get().strip()
-            component = entries["component_id"].get().strip()
+            enrollment = score_choice_maps["enrollment_id"].get(entries["enrollment_id"].get())
+            component = score_choice_maps["component_id"].get(entries["component_id"].get())
             score = entries["score"].get().strip()
             remarks = entries["remarks"].get().strip()
             if not enrollment or not component or not score:
-                raise ValueError("Enrollment ID, component ID, and score are required.")
+                raise ValueError("Choose an enrollment and grade component, then enter a score.")
             rows = self._query("SELECT period_id FROM grade_component WHERE component_id=%s", (component,))
             if not rows:
                 raise ValueError("Component ID was not found.")
@@ -593,10 +689,10 @@ class GradeManagementGUI(ctk.CTk):
             messagebox.showinfo("Score saved", "The student score has been saved.", parent=self)
 
         def delete():
-            enrollment = entries["enrollment_id"].get().strip()
-            component = entries["component_id"].get().strip()
+            enrollment = score_choice_maps["enrollment_id"].get(entries["enrollment_id"].get())
+            component = score_choice_maps["component_id"].get(entries["component_id"].get())
             if not enrollment or not component:
-                raise ValueError("Enter the enrollment ID and component ID for the score to remove.")
+                raise ValueError("Choose the enrollment and grade component for the score to remove.")
             found = self._query("SELECT period_id FROM grade_component WHERE component_id=%s", (component,))
             if not found:
                 raise ValueError("Component ID was not found.")
@@ -626,15 +722,21 @@ class GradeManagementGUI(ctk.CTk):
         compute.pack(side="left", fill="both", expand=True, padx=(0, 6))
         compute_row = ctk.CTkFrame(compute, fg_color="transparent")
         compute_row.pack(fill="x", padx=13, pady=(6, 14))
-        enrollment = self._small_input(compute_row, "Enrollment ID", 120)
-        class_id = self._small_input(compute_row, "Class ID", 100)
+        enrollment, enrollment_choices = self._small_combo(
+            compute_row, "Enrollment", self._reference_options("enrollment"), 240)
+        class_id, class_choices = self._small_combo(
+            compute_row, "Class", self._reference_options("class"), 220)
         result_label = ctk.CTkLabel(compute, text="Grade results will appear here.",
                                     text_color=self.MUTED, font=ctk.CTkFont(size=11))
         result_label.pack(anchor="w", padx=18, pady=(0, 13))
 
         def calculate():
+            enrollment_value = enrollment_choices.get(enrollment.get())
+            class_value = class_choices.get(class_id.get())
+            if not enrollment_value or not class_value:
+                raise ValueError("Choose an enrollment and a class before computing.")
             result = self.grading_service.calculate_and_save_period_grade(
-                enrollment_id=enrollment.get().strip(), class_id=class_id.get().strip())
+                enrollment_id=enrollment_value, class_id=class_value)
             result_label.configure(text="   •   ".join(f"{k.replace('_', ' ').title()}: {v}" for k, v in result.items()),
                                    text_color=self.GREEN)
 
@@ -649,10 +751,25 @@ class GradeManagementGUI(ctk.CTk):
                                button_color=self.BLUE, dropdown_fg_color=self.PANEL)
         kind.set("Class list")
         kind.pack(side="left", padx=5, pady=20)
-        report_id = ctk.CTkEntry(report_row, width=135, height=36, placeholder_text="Class / student ID",
-                                 fg_color="#0e1729", border_color=self.BORDER)
+        report_id = ctk.CTkComboBox(report_row, values=["Choose a record"], state="readonly",
+                                    width=260, height=36, fg_color="#0e1729",
+                                    border_color=self.BORDER, button_color=self.BLUE,
+                                    dropdown_fg_color=self.PANEL)
+        report_id.set("Choose a record")
+        report_choices = {"Choose a record": None}
         report_id.pack(side="left", padx=5, pady=20)
-        self._button(report_row, "Show report", lambda: self._render_report(kind.get(), report_id.get(), output), self.CYAN, "#081a1d")\
+        def refresh_report_choices(_value=None):
+            nonlocal report_choices
+            reference = "student" if kind.get() == "Student grade report" else "class"
+            options = self._reference_options(reference)
+            report_choices = {label: value for value, label in options}
+            labels = ["Choose a record"] + list(report_choices)
+            report_choices["Choose a record"] = None
+            report_id.configure(values=labels)
+            report_id.set("Choose a record")
+        kind.configure(command=refresh_report_choices)
+        refresh_report_choices()
+        self._button(report_row, "Show report", lambda: self._render_report(kind.get(), report_choices.get(report_id.get()), output), self.CYAN, "#081a1d")\
             .pack(side="left", padx=5, pady=20)
 
         output_card = self._card(page, "OUTPUT  /  REPORT DETAILS")
@@ -672,10 +789,18 @@ class GradeManagementGUI(ctk.CTk):
         entry.pack()
         return entry
 
+    def _small_combo(self, parent, label, options, width):
+        box = ctk.CTkFrame(parent, fg_color="transparent")
+        box.pack(side="left", padx=5, pady=3)
+        ctk.CTkLabel(box, text=label, text_color=self.MUTED,
+                     font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", pady=(0, 4))
+        combo, choices = self._make_combo(box, options, width=width, height=36)
+        combo.pack()
+        return combo, choices
+
     def _render_report(self, kind, ident, output):
-        ident = ident.strip()
-        if not ident:
-            raise ValueError("Enter a class ID or student ID for this report.")
+        if not ident or ident == "Choose a record":
+            raise ValueError("Choose a class or student for this report.")
         if kind == "Class list":
             data = self.report_service.get_class_list_report(ident)
         elif kind == "Grade sheet":
