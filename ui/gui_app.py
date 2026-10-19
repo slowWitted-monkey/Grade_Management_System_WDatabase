@@ -227,8 +227,42 @@ class GradeManagementGUI(tk.Tk):
                 self.cmb_offering_class['values'] = offering_ids
             if hasattr(self, 'cmb_offering_sheet'):
                 self.cmb_offering_sheet['values'] = offering_ids
+
+            # Update students list for calculation tab if offering options change
+            self.update_calc_students()
         except Exception as e:
             print(f"Error refreshing offering comboboxes: {e}")
+
+    def update_calc_students(self, event=None):
+        """Populate Student ID dropdown with students enrolled in the selected Offering ID."""
+        try:
+            if not hasattr(self, 'cmb_offering_id_calc') or not hasattr(self, 'cmb_calc_student_id'):
+                return
+            offering_id = self.cmb_offering_id_calc.get().strip()
+            if not offering_id:
+                return
+
+            from config.database import get_db_connection
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT s.student_id 
+                FROM student s 
+                JOIN enrollment e ON s.student_id = e.student_id 
+                WHERE e.offering_id = %s;
+            """, (offering_id,))
+            rows = cursor.fetchall()
+            student_ids = [row[0] for row in rows]
+            cursor.close()
+            conn.close()
+
+            self.cmb_calc_student_id['values'] = student_ids
+            if student_ids:
+                self.cmb_calc_student_id.set(student_ids[0])
+            else:
+                self.cmb_calc_student_id.set('')
+        except Exception as e:
+            print(f"Error updating calculation students: {e}")
 
     # ------------------------------------------------------------------
     # TAB 1.1: STUDENTS MANAGEMENT (Master Records -> Students)
@@ -363,7 +397,6 @@ class GradeManagementGUI(tk.Tk):
             return
 
         try:
-            # Check if student has active enrollments first (ST-07 Protection)
             from config.database import get_db_connection
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -633,49 +666,164 @@ class GradeManagementGUI(tk.Tk):
         try:
             self.enrolment_repo.enroll_student(enr_id, std_id, off_id)
             self.refresh_offering_comboboxes()
+            self.update_calc_students()
             messagebox.showinfo("Success", f"Student '{std_id}' enrolled into '{off_id}' successfully!")
         except Exception as e:
             messagebox.showerror("Enrollment Error", str(e))
 
     # ------------------------------------------------------------------
-    # TAB 3.1: GRADE COMPUTATION (Grading & Scores -> Grade Computation)
+    # TAB 3.1: GRADE COMPUTATION & COMPONENT SCORES (Grading & Scores)
     # ------------------------------------------------------------------
     def _setup_grade_entry_tab(self):
-        frame = ttk.LabelFrame(self.sub_comp_grade, text=" Compute & Save Period Grade ", style="Card.TLabelframe")
-        frame.pack(padx=30, pady=30, fill="x")
+        frame = ttk.LabelFrame(self.sub_comp_grade, text=" Component Score Entry & Grade Computation ", style="Card.TLabelframe")
+        frame.pack(padx=20, pady=20, fill="both", expand=True)
 
         inner_frame = ttk.Frame(frame, style="Card.TFrame")
-        inner_frame.pack(padx=20, pady=20)
+        inner_frame.pack(padx=20, pady=15, fill="x")
 
-        ttk.Label(inner_frame, text="Grade ID (e.g., GRD001):").grid(row=0, column=0, padx=12, pady=12, sticky="e")
-        self.ent_grade_id = ttk.Entry(inner_frame, width=20)
-        self.ent_grade_id.insert(0, "GRD001")
-        self.ent_grade_id.grid(row=0, column=1, padx=12, pady=12)
-
-        ttk.Label(inner_frame, text="Offering ID:").grid(row=1, column=0, padx=12, pady=12, sticky="e")
-        self.cmb_offering_id_calc = ttk.Combobox(inner_frame, width=18, values=["OFF001", "OFF002", "OFF003", "OFF004"])
+        ttk.Label(inner_frame, text="Offering ID:").grid(row=0, column=0, padx=8, pady=8, sticky="w")
+        self.cmb_offering_id_calc = ttk.Combobox(inner_frame, width=15, values=["OFF001", "OFF002", "OFF003", "OFF004"])
         self.cmb_offering_id_calc.set("OFF001")
-        self.cmb_offering_id_calc.grid(row=1, column=1, padx=12, pady=12)
+        self.cmb_offering_id_calc.grid(row=0, column=1, padx=8, pady=8, sticky="w")
+        self.cmb_offering_id_calc.bind("<<ComboboxSelected>>", self.update_calc_students)
 
-        btn_calc = ttk.Button(inner_frame, text="Calculate & Save Grade", style="Primary.TButton", command=self._handle_grade_calculation)
-        btn_calc.grid(row=2, column=0, columnspan=2, pady=20)
+        ttk.Label(inner_frame, text="Student ID:").grid(row=0, column=2, padx=8, pady=8, sticky="w")
+        self.cmb_calc_student_id = ttk.Combobox(inner_frame, width=15)
+        self.cmb_calc_student_id.grid(row=0, column=3, padx=8, pady=8, sticky="w")
 
-        self.lbl_calc_result = ttk.Label(inner_frame, text="", font=("Segoe UI", 11, "bold"))
-        self.lbl_calc_result.grid(row=3, column=0, columnspan=2, pady=5)
+        ttk.Label(inner_frame, text="Grading Period:").grid(row=0, column=4, padx=8, pady=8, sticky="w")
+        self.cmb_calc_period = ttk.Combobox(inner_frame, width=15, values=["Midterm", "Finals"], state="readonly")
+        self.cmb_calc_period.set("Midterm")
+        self.cmb_calc_period.grid(row=0, column=5, padx=8, pady=8, sticky="w")
+
+        scores_frame = ttk.LabelFrame(frame, text=" Raw Component Scores & Maximum Limits ", style="Card.TLabelframe")
+        scores_frame.pack(padx=20, pady=15, fill="x")
+
+        s_grid = ttk.Frame(scores_frame, style="Card.TFrame")
+        s_grid.pack(padx=15, pady=15, fill="x")
+
+        ttk.Label(s_grid, text="Quiz Score (Max: 50):").grid(row=0, column=0, padx=8, pady=8, sticky="w")
+        self.ent_score_quiz = ttk.Entry(s_grid, width=15)
+        self.ent_score_quiz.insert(0, "40")
+        self.ent_score_quiz.grid(row=0, column=1, padx=8, pady=8)
+
+        ttk.Label(s_grid, text="Lab / Project (Max: 100):").grid(row=0, column=2, padx=8, pady=8, sticky="w")
+        self.ent_score_lab = ttk.Entry(s_grid, width=15)
+        self.ent_score_lab.insert(0, "90")
+        self.ent_score_lab.grid(row=0, column=3, padx=8, pady=8)
+
+        ttk.Label(s_grid, text="Examination (Max: 100):").grid(row=0, column=4, padx=8, pady=8, sticky="w")
+        self.ent_score_exam = ttk.Entry(s_grid, width=15)
+        self.ent_score_exam.insert(0, "57")
+        self.ent_score_exam.grid(row=0, column=5, padx=8, pady=8)
+
+        action_frame = ttk.Frame(frame, style="Card.TFrame")
+        action_frame.pack(padx=20, pady=10, fill="x")
+
+        btn_calc = ttk.Button(action_frame, text="Compute & Save Scores", style="Primary.TButton", command=self._handle_grade_calculation)
+        btn_calc.pack(side="left", padx=5)
+
+        self.lbl_calc_result = ttk.Label(action_frame, text="", font=("Segoe UI", 11, "bold"))
+        self.lbl_calc_result.pack(side="left", padx=20)
+
+        self.update_calc_students()
 
     def _handle_grade_calculation(self):
-        grade_id = self.ent_grade_id.get().strip()
         offering_id = self.cmb_offering_id_calc.get().strip()
+        student_id = self.cmb_calc_student_id.get().strip()
+        period_name = self.cmb_calc_period.get().strip()
+
+        if not offering_id or not student_id:
+            messagebox.showwarning("Missing Data", "Please select both an Offering ID and a Student ID.")
+            return
 
         try:
-            student_id = self.grade_repository.get_student_id_by_grade_id(grade_id)
-            res = self.grading_service.calculate_and_save_period_grade(grade_id, student_id, offering_id)
+            quiz_score = float(self.ent_score_quiz.get().strip())
+            lab_score = float(self.ent_score_lab.get().strip())
+            exam_score = float(self.ent_score_exam.get().strip())
+        except ValueError:
+            messagebox.showwarning("Invalid Input", "All component scores must be valid numeric values.")
+            return
 
-            self.lbl_calc_result.config(text=f"Success! Calculated Final Grade: {res:.2f}%", foreground="#10B981")
-            messagebox.showinfo(title="Success", message=f"Grade updated successfully!\nComputed Grade: {res:.2f}%")
+        # Validation Checks (SC-02 & SC-03)
+        if quiz_score < 0 or lab_score < 0 or exam_score < 0:
+            messagebox.showerror("Validation Error (SC-03)", "Component scores cannot be negative numbers.")
+            return
+
+        if quiz_score > 50:
+            messagebox.showerror("Validation Error (SC-02)", f"Quiz score ({quiz_score}) exceeds maximum allowed limit of 50.")
+            return
+
+        if lab_score > 100:
+            messagebox.showerror("Validation Error (SC-02)", f"Laboratory score ({lab_score}) exceeds maximum allowed limit of 100.")
+            return
+
+        if exam_score > 100:
+            messagebox.showerror("Validation Error (SC-02)", f"Examination score ({exam_score}) exceeds maximum allowed limit of 100.")
+            return
+
+        try:
+            from config.database import get_db_connection
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            # 1. Ensure grading period exists with start_date & end_date to satisfy NOT NULL constraints
+            period_id = 'PRD001' if period_name.lower() in ['midterm', 'mid'] else 'PRD002'
+            cursor.execute(
+                """
+                INSERT INTO gradingperiod (period_id, name, start_date, end_date, school_year, semester)
+                VALUES (%s, %s, '2025-08-01', '2025-12-15', '2025-2026', '1st')
+                ON CONFLICT (period_id) DO NOTHING;
+                """,
+                (period_id, period_name)
+            )
+
+            # 2. Find active enrollment ID for this student and offering
+            cursor.execute("SELECT enrollment_id FROM enrollment WHERE student_id = %s AND offering_id = %s;", (student_id, offering_id))
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError(f"No active enrollment found for Student '{student_id}' in Offering '{offering_id}'. Please enroll them first.")
+            enrollment_id = row[0]
+
+            # 3. Calculate weighted grade (20% Quiz, 30% Lab, 50% Exam)
+            quiz_pct = (quiz_score / 50.0) * 100.0
+            computed_grade = (quiz_pct * 0.20) + (lab_score * 0.30) + (exam_score * 0.50)
+            remarks = "Passed" if computed_grade >= 75.0 else "Failed"
+
+            # 4. Save to grade table matching schema columns
+            grade_id = f"GRD_{student_id}_{period_id}"
+
+            if period_id == 'PRD001':
+                cursor.execute("""
+                    INSERT INTO grade (grade_id, enrollment_id, period_id, midterm_grade, overall_grade, remarks, date_encoded)
+                    VALUES (%s, %s, %s, %s, %s, %s, CURRENT_DATE)
+                    ON CONFLICT (grade_id) DO UPDATE SET
+                        midterm_grade = EXCLUDED.midterm_grade,
+                        overall_grade = EXCLUDED.overall_grade,
+                        remarks = EXCLUDED.remarks;
+                """, (grade_id, enrollment_id, period_id, computed_grade, computed_grade, remarks))
+            else:
+                cursor.execute("""
+                    INSERT INTO grade (grade_id, enrollment_id, period_id, finals_grade, overall_grade, remarks, date_encoded)
+                    VALUES (%s, %s, %s, %s, %s, %s, CURRENT_DATE)
+                    ON CONFLICT (grade_id) DO UPDATE SET
+                        finals_grade = EXCLUDED.finals_grade,
+                        overall_grade = EXCLUDED.overall_grade,
+                        remarks = EXCLUDED.remarks;
+                """, (grade_id, enrollment_id, period_id, computed_grade, computed_grade, remarks))
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            self.lbl_calc_result.config(
+                text=f"Computed Grade: {computed_grade:.2f}% | Remarks: {remarks}",
+                foreground="#10B981"
+            )
+            messagebox.showinfo("Success", f"Component scores saved and grade computed successfully!\nFinal Percentage: {computed_grade:.2f}% ({remarks})")
         except Exception as e:
             self.lbl_calc_result.config(text=f"Error: {str(e)}", foreground="#EF4444")
-            messagebox.showerror(title="Calculation Error", message=str(e))
+            messagebox.showerror("Calculation Error", str(e))
 
     # ------------------------------------------------------------------
     # TAB 3.2: DIRECT GRADE ENTRY (Grading & Scores -> Direct Grade Entry)
