@@ -142,3 +142,4 @@ class EnrolmentRepository:
         finally:
             cursor.close()
             conn.close()
+

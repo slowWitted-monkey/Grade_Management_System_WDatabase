@@ -718,12 +718,13 @@ class GradeManagementGUI(tk.Tk):
         self.ent_score_exam.grid(row=0, column=5, padx=8, pady=8)
 
         action_frame = ttk.Frame(frame, style="Card.TFrame")
-        action_frame.pack(padx=20, pady=10, fill="x")
+        action_frame.pack(padx=20, pady=15, fill="x")
 
         btn_calc = ttk.Button(action_frame, text="Compute & Save Scores", style="Primary.TButton", command=self._handle_grade_calculation)
         btn_calc.pack(side="left", padx=5)
 
-        self.lbl_calc_result = ttk.Label(action_frame, text="", font=("Segoe UI", 11, "bold"))
+        # Visible result feedback label
+        self.lbl_calc_result = ttk.Label(action_frame, text="Status: Ready to compute grades.", font=("Segoe UI", 10, "bold"), foreground="#9CA3AF")
         self.lbl_calc_result.pack(side="left", padx=20)
 
         self.update_calc_students()
@@ -767,7 +768,7 @@ class GradeManagementGUI(tk.Tk):
             conn = get_db_connection()
             cursor = conn.cursor()
 
-            # 1. Ensure grading period exists with start_date & end_date to satisfy NOT NULL constraints
+            # 1. Ensure grading period exists
             period_id = 'PRD001' if period_name.lower() in ['midterm', 'mid'] else 'PRD002'
             cursor.execute(
                 """
@@ -778,49 +779,37 @@ class GradeManagementGUI(tk.Tk):
                 (period_id, period_name)
             )
 
-            # 2. Find active enrollment ID for this student and offering
+            # 2. Find active enrollment ID
             cursor.execute("SELECT enrollment_id FROM enrollment WHERE student_id = %s AND offering_id = %s;", (student_id, offering_id))
             row = cursor.fetchone()
             if not row:
                 raise ValueError(f"No active enrollment found for Student '{student_id}' in Offering '{offering_id}'. Please enroll them first.")
             enrollment_id = row[0]
-
-            # 3. Calculate weighted grade (20% Quiz, 30% Lab, 50% Exam)
-            quiz_pct = (quiz_score / 50.0) * 100.0
-            computed_grade = (quiz_pct * 0.20) + (lab_score * 0.30) + (exam_score * 0.50)
-            remarks = "Passed" if computed_grade >= 75.0 else "Failed"
-
-            # 4. Save to grade table matching schema columns
-            grade_id = f"GRD_{student_id}_{period_id}"
-
-            if period_id == 'PRD001':
-                cursor.execute("""
-                    INSERT INTO grade (grade_id, enrollment_id, period_id, midterm_grade, overall_grade, remarks, date_encoded)
-                    VALUES (%s, %s, %s, %s, %s, %s, CURRENT_DATE)
-                    ON CONFLICT (grade_id) DO UPDATE SET
-                        midterm_grade = EXCLUDED.midterm_grade,
-                        overall_grade = EXCLUDED.overall_grade,
-                        remarks = EXCLUDED.remarks;
-                """, (grade_id, enrollment_id, period_id, computed_grade, computed_grade, remarks))
-            else:
-                cursor.execute("""
-                    INSERT INTO grade (grade_id, enrollment_id, period_id, finals_grade, overall_grade, remarks, date_encoded)
-                    VALUES (%s, %s, %s, %s, %s, %s, CURRENT_DATE)
-                    ON CONFLICT (grade_id) DO UPDATE SET
-                        finals_grade = EXCLUDED.finals_grade,
-                        overall_grade = EXCLUDED.overall_grade,
-                        remarks = EXCLUDED.remarks;
-                """, (grade_id, enrollment_id, period_id, computed_grade, computed_grade, remarks))
-
-            conn.commit()
             cursor.close()
             conn.close()
 
+            # 3. Save individual raw component scores to gradecomponentscore table (SC-01)
+            # Component IDs assumed: Midterm -> comp 1, 2, 3 | Finals -> comp 4, 5, 6
+            c_quiz = '1' if period_id == 'PRD001' else '4'
+            c_lab = '2' if period_id == 'PRD001' else '5'
+            c_exam = '3' if period_id == 'PRD001' else '6'
+
+            self.grade_repo.save_component_score(enrollment_id, period_id, c_quiz, quiz_score)
+            self.grade_repo.save_component_score(enrollment_id, period_id, c_lab, lab_score)
+            self.grade_repo.save_component_score(enrollment_id, period_id, c_exam, exam_score)
+
+            # 4. Trigger grading service calculation
+            result = self.grading_service.calculate_and_save_period_grade(f"GRD_{enrollment_id}", student_id, offering_id)
+
+            computed_grade = result.get("overall_pct", 0.0)
+            equiv = result.get("final_equiv", 1.0)
+            remarks = result.get("remarks", "Passed")
+
             self.lbl_calc_result.config(
-                text=f"Computed Grade: {computed_grade:.2f}% | Remarks: {remarks}",
+                text=f"Computed: {computed_grade:.2f}% | Grade Point: {equiv:.2f} | Remarks: {remarks}",
                 foreground="#10B981"
             )
-            messagebox.showinfo("Success", f"Component scores saved and grade computed successfully!\nFinal Percentage: {computed_grade:.2f}% ({remarks})")
+            messagebox.showinfo("Success", f"Component scores saved and grade computed successfully!\nFinal Percentage: {computed_grade:.2f}% (Equivalent: {equiv:.2f} - {remarks})")
         except Exception as e:
             self.lbl_calc_result.config(text=f"Error: {str(e)}", foreground="#EF4444")
             messagebox.showerror("Calculation Error", str(e))

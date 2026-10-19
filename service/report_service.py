@@ -4,7 +4,7 @@ from config.database import get_db_connection
 class ReportService:
 
     def get_class_list(self, offering_id: str) -> list:
-        """Fetches class list records as a list of dictionaries for GUI rendering."""
+        """Fetches class list records as a list of dictionaries sorted alphabetically (RP-01)."""
         conn = get_db_connection()
         cursor = conn.cursor()
         try:
@@ -32,14 +32,13 @@ class ReportService:
             conn.close()
 
     def get_class_grade_sheet(self, offering_id: str) -> list:
-        """Fetches class grade sheet records as a list of dictionaries."""
+        """Fetches class grade sheet records with MG and FG grade equivalents (RP-02)."""
         conn = get_db_connection()
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                SELECT st.student_id, st.first_name, st.last_name, 
-                       COALESCE(g.period_id, 'Finals') AS period_name, 
-                       g.final_grade, g.remarks
+                SELECT st.student_id, st.first_name, st.last_name, st.program,
+                       g.midterm_equiv, g.final_equiv, g.remarks
                 FROM enrollment e
                 JOIN student st ON e.student_id = st.student_id
                 LEFT JOIN grade g ON e.enrollment_id = g.enrollment_id
@@ -53,41 +52,64 @@ class ReportService:
                     "student_id": r[0],
                     "first_name": r[1],
                     "last_name": r[2],
-                    "period_name": r[3],
-                    "final_grade": r[4],
-                    "remarks": r[5]
+                    "program": r[3],
+                    "midterm_equiv": r[4],
+                    "final_equiv": r[5],
+                    "remarks": r[6]
                 })
             return result
         finally:
             cursor.close()
             conn.close()
 
-    def get_student_grade_report(self, student_id: str) -> list:
-        """Fetches student grade report records as a list of dictionaries."""
+    def get_student_grade_report(self, student_id: str) -> dict:
+        """Fetches student grade records and computes exact Grade Weighted Average (RP-03, RP-04)."""
         conn = get_db_connection()
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                SELECT co.offering_id, s.subject_code, 
-                       COALESCE(g.period_id, 'Finals') AS period_name, 
-                       g.final_grade, g.remarks
+                SELECT co.offering_id, s.subject_code, s.subject_name, 
+                       CONCAT(t.first_name, ' ', t.last_name) AS teacher_name, 
+                       s.units, g.final_equiv, g.remarks
                 FROM enrollment e
                 JOIN classoffering co ON e.offering_id = co.offering_id
                 JOIN subject s ON co.subject_id = s.subject_id
+                JOIN teacher t ON co.teacher_id = t.teacher_id
                 LEFT JOIN grade g ON e.enrollment_id = g.enrollment_id
                 WHERE e.student_id = %s AND e.status = 'Enrolled';
             """, (student_id,))
             rows = cursor.fetchall()
-            result = []
+
+            records = []
+            total_units = 0
+            weighted_sum = 0.0
+
             for r in rows:
-                result.append({
+                units = r[4] or 0
+                f_grade = float(r[5]) if r[5] is not None else 0.0
+
+                if r[5] is not None:
+                    total_units += units
+                    weighted_sum += f_grade * units
+
+                records.append({
                     "offering_id": r[0],
                     "subject_code": r[1],
-                    "period_name": r[2],
-                    "final_grade": r[3],
-                    "remarks": r[4]
+                    "description": r[2],
+                    "teacher_name": r[3],
+                    "units": units,
+                    "final_equiv": r[5],
+                    "remarks": r[6]
                 })
-            return result
+
+            gwa = round(weighted_sum / total_units, 2) if total_units > 0 else 0.0
+
+            return {
+                "records": records,
+                "total_units": total_units,
+                "no_of_subjects": len(records),
+                "gwa": gwa
+            }
         finally:
             cursor.close()
             conn.close()
