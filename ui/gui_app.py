@@ -290,6 +290,23 @@ class GradeManagementGUI(ctk.CTk):
 
     def _reference_options(self, kind):
         """Return database-backed (stored value, display label) choices."""
+        common_values = {
+            "program": ["BSCS", "BSIT"],
+            "department": ["Computer Studies Department", "Information Technology Department",
+                           "Physical Education Department"],
+        }
+        if kind in common_values:
+            table = "student" if kind == "program" else "teacher"
+            try:
+                rows = self._query(
+                    f"SELECT DISTINCT {kind} FROM {table} WHERE {kind} IS NOT NULL "
+                    f"AND btrim({kind}) <> '' ORDER BY {kind}"
+                )
+                values = {str(row[0]) for row in rows}
+            except Exception:
+                values = set()
+            values.update(common_values[kind])
+            return [(value, value) for value in sorted(values, key=str.casefold)]
         queries = {
             "student": """SELECT student_id, student_id || ' — ' || first_name || ' ' || last_name
                 FROM student ORDER BY last_name, first_name""",
@@ -333,6 +350,10 @@ class GradeManagementGUI(ctk.CTk):
             ("grade_component", "period_id"): "period",
         }
         definitions = {}
+        if table == "student":
+            definitions["program"] = self._reference_options("program")
+        elif table == "teacher":
+            definitions["department"] = self._reference_options("department")
         for (owner, field), reference in foreign_keys.items():
             if owner == table:
                 definitions[field] = self._reference_options(reference)
@@ -348,13 +369,13 @@ class GradeManagementGUI(ctk.CTk):
             definitions["year_level"] = [(str(n), f"{n} — {n}{'st' if n == 1 else 'nd' if n == 2 else 'rd' if n == 3 else 'th'} year") for n in range(1, 9)]
         return definitions
 
-    def _make_combo(self, parent, options, *, default=None, width=None, height=35):
+    def _make_combo(self, parent, options, *, default=None, width=None, height=35, editable=False):
         """Create a dropdown and a display-label-to-stored-value map."""
         label_to_value = {label: value for value, label in options}
         placeholder = "Choose an available record"
         values = [placeholder] + list(label_to_value)
         combo = ctk.CTkComboBox(
-            parent, values=values, state="readonly", height=height,
+            parent, values=values, state="normal" if editable else "readonly", height=height,
             width=width or 220, fg_color="#0e1729", border_color=self.BORDER,
             button_color=self.BLUE, dropdown_fg_color=self.PANEL,
         )
@@ -427,6 +448,7 @@ class GradeManagementGUI(ctk.CTk):
         widgets = {}
         choice_maps = {}
         choice_definitions = self._choice_definitions(table)
+        editable_choices = {"program", "department"}
         auto_keys = {"subject_id", "class_id", "enrollment_id", "period_id", "component_id"}
         field_defaults = {
             "student": {"status": "Active"},
@@ -445,7 +467,8 @@ class GradeManagementGUI(ctk.CTk):
                 .pack(anchor="w", padx=2, pady=(0, 5))
             if field in choice_definitions:
                 entry, choice_maps[field] = self._make_combo(
-                    cell, choice_definitions[field], default=field_defaults.get(field), height=35)
+                    cell, choice_definitions[field], default=field_defaults.get(field), height=35,
+                    editable=field in editable_choices)
             else:
                 entry = ctk.CTkEntry(cell, height=35, corner_radius=8,
                                      fg_color="#0e1729", border_color=self.BORDER,
@@ -487,7 +510,10 @@ class GradeManagementGUI(ctk.CTk):
             widget = widgets[field]
             if field in choice_maps:
                 display = next((label for label, raw in choice_maps[field].items()
-                                if raw is not None and str(raw) == str(value)), "Choose an available record")
+                                if raw is not None and str(raw) == str(value)), None)
+                if display is None and field in editable_choices and value:
+                    display = str(value)
+                display = display or "Choose an available record"
                 widget.set(display)
                 return
             disabled = str(widget.cget("state")) == "disabled"
@@ -540,7 +566,10 @@ class GradeManagementGUI(ctk.CTk):
                 if field == key and field in auto_keys:
                     continue
                 if field in choice_maps:
-                    data[field] = choice_maps[field].get(value)
+                    if field in editable_choices:
+                        data[field] = choice_maps[field].get(value, value) or None
+                    else:
+                        data[field] = choice_maps[field].get(value)
                     continue
                 data[field] = value or None
             return data
