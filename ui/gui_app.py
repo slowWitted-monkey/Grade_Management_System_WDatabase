@@ -376,7 +376,14 @@ class GradeManagementGUI(ctk.CTk):
             self.db_badge.configure(text="●  DATABASE OFFLINE", text_color=self.AMBER)
 
     def _show_error(self, error):
-        messagebox.showerror("Unable to complete action", str(error), parent=self)
+        sqlstate = getattr(error, "pgcode", None)
+        if sqlstate == "23505":
+            message = "A record with that ID or unique code already exists. Please use a different value."
+        elif sqlstate == "23503":
+            message = "This record is linked to other records and cannot be removed while they depend on it."
+        else:
+            message = str(error)
+        messagebox.showerror("Unable to complete action", message, parent=self)
 
     def _guard(self, action):
         try:
@@ -452,6 +459,13 @@ class GradeManagementGUI(ctk.CTk):
 
         tree_card = self._card(page, "RECORDS  /  SELECT A ROW TO EDIT")
         tree_card.pack(fill="both", expand=True)
+        search_row = ctk.CTkFrame(tree_card, fg_color="transparent")
+        search_row.pack(fill="x", padx=12, pady=(6, 4))
+        search_entry = ctk.CTkEntry(
+            search_row, width=300, height=34, fg_color="#0e1729",
+            border_color=self.BORDER, placeholder_text=f"Search {title.lower()}...",
+        )
+        search_entry.pack(side="left", padx=(0, 7))
         controls = ctk.CTkFrame(tree_card, fg_color="transparent")
         controls.pack(fill="x", padx=12, pady=(6, 10))
         columns = tuple(fields)
@@ -492,9 +506,23 @@ class GradeManagementGUI(ctk.CTk):
 
         def refresh():
             tree.delete(*tree.get_children())
-            rows = self._query(f"SELECT {', '.join(fields)} FROM {table} ORDER BY {key}")
+            term = search_entry.get().strip()
+            sql = f"SELECT {', '.join(fields)} FROM {table}"
+            params = ()
+            if term:
+                predicates = [f"CAST({field} AS TEXT) ILIKE %s" for field in fields]
+                sql += " WHERE " + " OR ".join(predicates)
+                params = tuple(f"%{term}%" for _field in fields)
+            rows = self._query(sql + f" ORDER BY {key}", params)
             for row in rows:
                 tree.insert("", "end", values=["" if value is None else value for value in row])
+
+        def search_records(_event=None):
+            self._guard(refresh)
+
+        def clear_search():
+            search_entry.delete(0, "end")
+            self._guard(refresh)
 
         def selected(_event=None):
             item = tree.focus()
@@ -530,9 +558,11 @@ class GradeManagementGUI(ctk.CTk):
                 "grading_period": {"name", "period_order", "school_year", "semester"},
                 "grade_component": {"period_id", "name", "type", "max_score"},
             }.get(table, set())
-            missing = sorted(field for field in required if not data.get(field))
+            missing = sorted(field.replace("_", " ").title()
+                             for field in required if not data.get(field))
             if missing:
-                raise ValueError("Complete these required fields: " + ", ".join(missing))
+                noun = "field" if len(missing) == 1 else "fields"
+                raise ValueError(f"Complete these required {noun}: " + ", ".join(missing) + ".")
             names = list(data)
             marks = ", ".join(["%s"] * len(names))
             self._query(f"INSERT INTO {table} ({', '.join(names)}) VALUES ({marks})",
@@ -567,6 +597,9 @@ class GradeManagementGUI(ctk.CTk):
         self._button(controls, "Update selected", update, self.CARD_HOVER).pack(side="left", padx=4)
         self._button(controls, "Delete selected", delete, "#432638", self.RED).pack(side="left", padx=4)
         self._button(controls, "Clear form", clear, self.CARD_HOVER).pack(side="right")
+        self._button(search_row, "Search", search_records, self.BLUE).pack(side="left", padx=(0, 6))
+        self._button(search_row, "Clear search", clear_search, self.CARD_HOVER).pack(side="left")
+        search_entry.bind("<Return>", search_records)
         tree.bind("<<TreeviewSelect>>", selected)
         self.after(100, lambda: self._guard(refresh))
 
