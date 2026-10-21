@@ -663,32 +663,128 @@ class GradeManagementGUI(ctk.CTk):
         area.pack(fill="both", expand=True, padx=10, pady=(6, 12))
         entries = {}
 
+
         def load():
             for child in area.winfo_children():
                 child.destroy()
+
             entries.clear()
+
             class_value = class_choices.get(class_id.get())
             if not class_value:
                 raise ValueError("Choose a class first.")
-            rows = self._query("""SELECT gc.component_id,gc.name,gp.name,gp.period_id,COALESCE(w.percentage,0)
-                FROM grade_component gc JOIN grading_period gp USING(period_id)
-                LEFT JOIN grade_percentage w ON w.component_id=gc.component_id AND w.class_id=%s
-                WHERE gp.school_year=(SELECT school_year FROM class_offering WHERE class_id=%s)
-                AND gp.semester=(SELECT semester FROM class_offering WHERE class_id=%s)
-                ORDER BY gp.period_order,gc.component_id""", (class_value, class_value, class_value))
+
+            rows = self._query(
+                """
+                SELECT
+                    gc.component_id,
+                    gc.name,
+                    gp.name,
+                    gp.period_id,
+                    gc.max_score,
+                    COALESCE(w.percentage, 0)
+                FROM grade_component gc
+                JOIN grading_period gp USING (period_id)
+                LEFT JOIN grade_percentage w
+                    ON w.component_id = gc.component_id
+                    AND w.class_id = %s
+                WHERE gp.school_year = (
+                    SELECT school_year
+                    FROM class_offering
+                    WHERE class_id = %s
+                )
+                AND gp.semester = (
+                    SELECT semester
+                    FROM class_offering
+                    WHERE class_id = %s
+                )
+                ORDER BY gp.period_order, gc.component_id
+                """,
+                (class_value, class_value, class_value)
+            )
+
             if not rows:
-                raise ValueError("No grade components were found for this class term.")
-            for i, label in enumerate(("PERIOD", "COMPONENT", "WEIGHT (%)")):
-                ctk.CTkLabel(area, text=label, text_color=self.CYAN,
-                             font=ctk.CTkFont(family="Consolas", size=10, weight="bold"))\
-                    .grid(row=0, column=i, sticky="w", padx=12, pady=(8, 12))
-            for i, (cid, name, period, _period_id, pct) in enumerate(rows, 1):
-                ctk.CTkLabel(area, text=period, text_color=self.MUTED).grid(row=i, column=0, sticky="w", padx=12, pady=6)
-                ctk.CTkLabel(area, text=name, text_color=self.TEXT).grid(row=i, column=1, sticky="w", padx=12, pady=6)
-                entry = ctk.CTkEntry(area, width=120, height=34, fg_color="#0e1729", border_color=self.BORDER)
+                raise ValueError(
+                    "No grade components were found for this class term."
+                )
+
+            headers = (
+                "PERIOD",
+                "COMPONENT",
+                "MAX SCORE",
+                "WEIGHT (%)"
+            )
+
+            for column, label in enumerate(headers):
+                area.grid_columnconfigure(
+                    column,
+                    weight=1 if column in (1, 3) else 0
+                )
+
+                ctk.CTkLabel(
+                    area,
+                    text=label,
+                    text_color=self.CYAN,
+                    font=ctk.CTkFont(
+                        family="Consolas",
+                        size=10,
+                        weight="bold"
+                    )
+                ).grid(
+                    row=0,
+                    column=column,
+                    sticky="w",
+                    padx=12,
+                    pady=(8, 12)
+                )
+
+            for i, (
+                    cid,
+                    name,
+                    period,
+                    _period_id,
+                    max_score,
+                    pct
+            ) in enumerate(rows, 1):
+
+                ctk.CTkLabel(
+                    area,
+                    text=period,
+                    text_color=self.MUTED
+                ).grid(
+                    row=i, column=0, sticky="w", padx=12, pady=6
+                )
+
+                ctk.CTkLabel(
+                    area,
+                    text=name,
+                    text_color=self.TEXT
+                ).grid(
+                    row=i, column=1, sticky="w", padx=12, pady=6
+                )
+
+                ctk.CTkLabel(
+                    area,
+                    text=str(max_score),
+                    text_color=self.TEXT
+                ).grid(
+                    row=i, column=2, sticky="w", padx=12, pady=6
+                )
+
+                entry = ctk.CTkEntry(
+                    area,
+                    width=120,
+                    height=34,
+                    fg_color="#0e1729",
+                    border_color=self.BORDER
+                )
                 entry.insert(0, str(pct))
-                entry.grid(row=i, column=2, sticky="w", padx=12, pady=5)
+                entry.grid(
+                    row=i, column=3, sticky="w", padx=12, pady=5
+                )
+
                 entries[cid] = entry
+
 
         def save():
             if not entries:
