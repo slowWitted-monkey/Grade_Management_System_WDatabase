@@ -681,8 +681,11 @@ class GradeManagementGUI(ctk.CTk):
         ctk.CTkLabel(list_card, text="Set each component’s share. Every period must add up to 100%.",
                      text_color=self.MUTED, font=ctk.CTkFont(size=10))\
             .pack(anchor="w", padx=16, pady=(0, 8))
-        area = ctk.CTkFrame(list_card, fg_color="transparent")
-        area.pack(fill="both", expand=True, padx=12, pady=(0, 14))
+        area = ctk.CTkScrollableFrame(
+            list_card, fg_color="transparent", corner_radius=0,
+            scrollbar_button_color=self.BORDER,
+            scrollbar_button_hover_color=self.BLUE)
+        area.pack(fill="both", expand=True, padx=8, pady=(0, 12))
         entries = {}
         period_entries = {}
         period_totals = {}
