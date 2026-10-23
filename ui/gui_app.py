@@ -398,10 +398,23 @@ class GradeManagementGUI(ctk.CTk):
 
     def _show_error(self, error):
         sqlstate = getattr(error, "pgcode", None)
+        constraint = getattr(getattr(error, "diag", None), "constraint_name", "") or ""
         if sqlstate == "23505":
             message = "A record with that ID or unique code already exists. Please use a different value."
         elif sqlstate == "23503":
-            message = "This record is linked to other records and cannot be removed while they depend on it."
+            messages = {
+                "enrollment_student_id_fkey": "This student has an enrollment. Remove or reassign the enrollment before deleting the student.",
+                "enrollment_class_id_fkey": "This class has student enrollments. Remove the enrollments before deleting the class.",
+                "class_offering_teacher_id_fkey": "This teacher is assigned to a class. Reassign or remove the class before deleting the teacher.",
+                "class_offering_subject_id_fkey": "This subject is used by a class. Reassign or remove the class before deleting the subject.",
+            }
+            message = messages.get(constraint, "This record is still used by other records and cannot be deleted yet.")
+        elif sqlstate == "23514" and "units" in constraint:
+            message = "Units must be a positive whole number."
+        elif sqlstate == "23502":
+            message = "Complete all required fields before saving."
+        elif sqlstate == "22P02":
+            message = "Enter a valid number or value in each field."
         else:
             message = str(error)
         messagebox.showerror("Unable to complete action", message, parent=self)
@@ -598,6 +611,7 @@ class GradeManagementGUI(ctk.CTk):
                         tuple(data[name] for name in names), fetch=False)
             refresh()
             clear()
+            messagebox.showinfo("Record added", f"The {title.lower()} record was added successfully.", parent=self)
 
         def update():
             if state["selected"] is None:
@@ -611,6 +625,7 @@ class GradeManagementGUI(ctk.CTk):
                         tuple(data.values()) + (state["selected"],), fetch=False)
             refresh()
             clear()
+            messagebox.showinfo("Changes saved", f"The {title.lower()} record was updated successfully.", parent=self)
 
         def delete():
             if state["selected"] is None:
@@ -620,6 +635,7 @@ class GradeManagementGUI(ctk.CTk):
             self._query(f"DELETE FROM {table} WHERE {key}=%s", (state["selected"],), fetch=False)
             refresh()
             clear()
+            messagebox.showinfo("Record deleted", f"The {title.lower()} record was deleted.", parent=self)
 
         self._button(controls, "＋  Add record", add, self.BLUE).pack(side="left", padx=(0, 7))
         self._button(controls, "↻  Refresh", refresh, self.CARD_HOVER).pack(side="left", padx=4)
@@ -663,128 +679,32 @@ class GradeManagementGUI(ctk.CTk):
         area.pack(fill="both", expand=True, padx=10, pady=(6, 12))
         entries = {}
 
-
         def load():
             for child in area.winfo_children():
                 child.destroy()
-
             entries.clear()
-
             class_value = class_choices.get(class_id.get())
             if not class_value:
                 raise ValueError("Choose a class first.")
-
-            rows = self._query(
-                """
-                SELECT
-                    gc.component_id,
-                    gc.name,
-                    gp.name,
-                    gp.period_id,
-                    gc.max_score,
-                    COALESCE(w.percentage, 0)
-                FROM grade_component gc
-                JOIN grading_period gp USING (period_id)
-                LEFT JOIN grade_percentage w
-                    ON w.component_id = gc.component_id
-                    AND w.class_id = %s
-                WHERE gp.school_year = (
-                    SELECT school_year
-                    FROM class_offering
-                    WHERE class_id = %s
-                )
-                AND gp.semester = (
-                    SELECT semester
-                    FROM class_offering
-                    WHERE class_id = %s
-                )
-                ORDER BY gp.period_order, gc.component_id
-                """,
-                (class_value, class_value, class_value)
-            )
-
+            rows = self._query("""SELECT gc.component_id,gc.name,gp.name,gp.period_id,COALESCE(w.percentage,0)
+                FROM grade_component gc JOIN grading_period gp USING(period_id)
+                LEFT JOIN grade_percentage w ON w.component_id=gc.component_id AND w.class_id=%s
+                WHERE gp.school_year=(SELECT school_year FROM class_offering WHERE class_id=%s)
+                AND gp.semester=(SELECT semester FROM class_offering WHERE class_id=%s)
+                ORDER BY gp.period_order,gc.component_id""", (class_value, class_value, class_value))
             if not rows:
-                raise ValueError(
-                    "No grade components were found for this class term."
-                )
-
-            headers = (
-                "PERIOD",
-                "COMPONENT",
-                "MAX SCORE",
-                "WEIGHT (%)"
-            )
-
-            for column, label in enumerate(headers):
-                area.grid_columnconfigure(
-                    column,
-                    weight=1 if column in (1, 3) else 0
-                )
-
-                ctk.CTkLabel(
-                    area,
-                    text=label,
-                    text_color=self.CYAN,
-                    font=ctk.CTkFont(
-                        family="Consolas",
-                        size=10,
-                        weight="bold"
-                    )
-                ).grid(
-                    row=0,
-                    column=column,
-                    sticky="w",
-                    padx=12,
-                    pady=(8, 12)
-                )
-
-            for i, (
-                    cid,
-                    name,
-                    period,
-                    _period_id,
-                    max_score,
-                    pct
-            ) in enumerate(rows, 1):
-
-                ctk.CTkLabel(
-                    area,
-                    text=period,
-                    text_color=self.MUTED
-                ).grid(
-                    row=i, column=0, sticky="w", padx=12, pady=6
-                )
-
-                ctk.CTkLabel(
-                    area,
-                    text=name,
-                    text_color=self.TEXT
-                ).grid(
-                    row=i, column=1, sticky="w", padx=12, pady=6
-                )
-
-                ctk.CTkLabel(
-                    area,
-                    text=str(max_score),
-                    text_color=self.TEXT
-                ).grid(
-                    row=i, column=2, sticky="w", padx=12, pady=6
-                )
-
-                entry = ctk.CTkEntry(
-                    area,
-                    width=120,
-                    height=34,
-                    fg_color="#0e1729",
-                    border_color=self.BORDER
-                )
+                raise ValueError("No grade components were found for this class term.")
+            for i, label in enumerate(("PERIOD", "COMPONENT", "WEIGHT (%)")):
+                ctk.CTkLabel(area, text=label, text_color=self.CYAN,
+                             font=ctk.CTkFont(family="Consolas", size=10, weight="bold"))\
+                    .grid(row=0, column=i, sticky="w", padx=12, pady=(8, 12))
+            for i, (cid, name, period, _period_id, pct) in enumerate(rows, 1):
+                ctk.CTkLabel(area, text=period, text_color=self.MUTED).grid(row=i, column=0, sticky="w", padx=12, pady=6)
+                ctk.CTkLabel(area, text=name, text_color=self.TEXT).grid(row=i, column=1, sticky="w", padx=12, pady=6)
+                entry = ctk.CTkEntry(area, width=120, height=34, fg_color="#0e1729", border_color=self.BORDER)
                 entry.insert(0, str(pct))
-                entry.grid(
-                    row=i, column=3, sticky="w", padx=12, pady=5
-                )
-
+                entry.grid(row=i, column=2, sticky="w", padx=12, pady=5)
                 entries[cid] = entry
-
 
         def save():
             if not entries:
@@ -841,9 +761,9 @@ class GradeManagementGUI(ctk.CTk):
             if not rows:
                 raise ValueError("Component ID was not found.")
             self.grade_repo.save_component_score(enrollment, rows[0][0], component, score)
-            if remarks:
-                self._query("UPDATE grade_component_score SET remarks=%s WHERE enrollment_id=%s AND component_id=%s",
-                            (remarks, enrollment, component), fetch=False)
+            self._query("UPDATE grade_component_score SET remarks=%s WHERE enrollment_id=%s AND component_id=%s",
+                        (remarks or None, enrollment, component), fetch=False)
+            reload_saved_scores()
             messagebox.showinfo("Score saved", "The student score has been saved.", parent=self)
 
         def delete():
@@ -858,6 +778,7 @@ class GradeManagementGUI(ctk.CTk):
                 return
             if not self.grade_repo.delete_component_score(enrollment, found[0][0], component):
                 raise ValueError("No score exists for that enrollment and component.")
+            reload_saved_scores()
             messagebox.showinfo("Score deleted", "The component score has been deleted.", parent=self)
 
         buttons = ctk.CTkFrame(card, fg_color="transparent")
@@ -865,19 +786,90 @@ class GradeManagementGUI(ctk.CTk):
         self._button(buttons, "Save score", save, self.BLUE).pack(side="left", padx=5)
         self._button(buttons, "Delete score", delete, "#432638", self.RED).pack(side="left", padx=5)
 
+        saved_card = self._card(page, "SAVED SCORES  /  RELOAD BY CLASS")
+        saved_card.pack(fill="both", expand=True, pady=(12, 0))
+        saved_controls = ctk.CTkFrame(saved_card, fg_color="transparent")
+        saved_controls.pack(fill="x", padx=12, pady=(5, 8))
+        class_options = self._reference_options("class")
+        class_filter, class_filter_choices = self._make_combo(
+            saved_controls, class_options, width=420, height=36)
+        class_filter.pack(side="left", padx=(4, 8))
+        if class_options:
+            class_filter.set(class_options[0][1])
+        score_tree_wrap = ctk.CTkFrame(saved_card, fg_color=self.PANEL, corner_radius=9)
+        score_tree_wrap.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        score_columns = ("enrollment_id", "component_id", "student", "period", "component",
+                         "score", "maximum", "remarks", "recorded")
+        score_tree = ttk.Treeview(score_tree_wrap, columns=score_columns,
+                                  displaycolumns=score_columns[2:], show="headings", height=9)
+        for column, title, width in (
+            ("student", "Student", 210), ("period", "Period", 110),
+            ("component", "Component", 230), ("score", "Score", 80),
+            ("maximum", "Max", 70), ("remarks", "Remarks", 230),
+            ("recorded", "Date Recorded", 120),
+        ):
+            score_tree.heading(column, text=title)
+            score_tree.column(column, width=width, minwidth=70,
+                              anchor="center" if column in {"score", "maximum", "recorded"} else "w",
+                              stretch=column in {"student", "component", "remarks"})
+        score_tree.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=6)
+        score_scroll = ttk.Scrollbar(score_tree_wrap, orient="vertical", command=score_tree.yview)
+        score_scroll.pack(side="right", fill="y", padx=(0, 5), pady=6)
+        score_tree.configure(yscrollcommand=score_scroll.set)
+
+        def reload_saved_scores():
+            score_tree.delete(*score_tree.get_children())
+            selected_class = class_filter_choices.get(class_filter.get())
+            if not selected_class:
+                return
+            rows = self._query("""SELECT e.enrollment_id, gc.component_id,
+                st.last_name || ', ' || st.first_name, gp.name, gc.name,
+                gcs.score, gc.max_score, COALESCE(gcs.remarks, ''), gcs.date_recorded
+                FROM grade_component_score gcs
+                JOIN enrollment e USING(enrollment_id)
+                JOIN student st USING(student_id)
+                JOIN grade_component gc USING(component_id)
+                JOIN grading_period gp USING(period_id)
+                WHERE e.class_id=%s AND e.status='Enrolled'
+                ORDER BY st.last_name, st.first_name, gp.period_order, gc.component_id""",
+                (selected_class,))
+            for row in rows:
+                score_tree.insert("", "end", values=row)
+
+        def select_saved_score(_event=None):
+            selected = score_tree.focus()
+            if not selected:
+                return
+            values = score_tree.item(selected, "values")
+            enrollment_id, component_id = values[:2]
+            for field, value in (("enrollment_id", enrollment_id), ("component_id", component_id)):
+                display = next((label for label, stored in score_choice_maps[field].items()
+                                if stored is not None and str(stored) == str(value)), None)
+                if display:
+                    entries[field].set(display)
+            entries["score"].delete(0, "end")
+            entries["score"].insert(0, str(values[5]))
+            entries["remarks"].delete(0, "end")
+            entries["remarks"].insert(0, str(values[7]))
+
+        self._button(saved_controls, "↻  Reload scores", reload_saved_scores,
+                     self.CARD_HOVER).pack(side="left", padx=4)
+        class_filter.configure(command=lambda _value: self._guard(reload_saved_scores))
+        score_tree.bind("<<TreeviewSelect>>", select_saved_score)
+        self.after(120, lambda: self._guard(reload_saved_scores))
+
     def show_reports_page(self):
         self._set_page("Compute & Reports", "reports")
         page = ctk.CTkFrame(self.content, fg_color="transparent")
         page.grid(row=0, column=0, sticky="nsew")
         page.grid_columnconfigure(0, weight=1)
-        page.grid_rowconfigure(2, weight=1)
         self._section_intro(page, "Compute grades and build reports",
                             "Recalculate a student’s weighted grade or view class and student reports.")
 
         tools = ctk.CTkFrame(page, fg_color="transparent")
         tools.pack(fill="x", pady=(0, 12))
         compute = self._card(tools, "GRADE COMPUTATION")
-        compute.pack(side="left", fill="both", expand=True, padx=(0, 6))
+        compute.pack(fill="x", pady=(0, 10))
         compute_row = ctk.CTkFrame(compute, fg_color="transparent")
         compute_row.pack(fill="x", padx=13, pady=(6, 14))
         enrollment, enrollment_choices = self._small_combo(
@@ -901,21 +893,28 @@ class GradeManagementGUI(ctk.CTk):
         self._button(compute_row, "Compute & save", calculate, self.BLUE).pack(side="left", padx=5, pady=20)
 
         report = self._card(tools, "REPORT VIEWER")
-        report.pack(side="left", fill="both", expand=True, padx=(6, 0))
+        report.pack(fill="x")
         report_row = ctk.CTkFrame(report, fg_color="transparent")
-        report_row.pack(fill="x", padx=13, pady=(6, 14))
+        report_row.pack(fill="x", padx=13, pady=(6, 8))
+        report_row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(report_row, text="Report type", text_color=self.MUTED,
+                     font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=0, sticky="w", padx=5, pady=(0, 4))
+        ctk.CTkLabel(report_row, text="Choose a class or student", text_color=self.MUTED,
+                     font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=1, sticky="w", padx=5, pady=(0, 4))
         kind = ctk.CTkComboBox(report_row, values=["Class list", "Grade sheet", "Student grade report"],
-                               width=180, height=36, fg_color="#0e1729", border_color=self.BORDER,
+                               width=220, height=36, fg_color="#0e1729", border_color=self.BORDER,
                                button_color=self.BLUE, dropdown_fg_color=self.PANEL)
         kind.set("Class list")
-        kind.pack(side="left", padx=5, pady=20)
-        report_id = ctk.CTkComboBox(report_row, values=["Choose a record"], state="readonly",
-                                    width=260, height=36, fg_color="#0e1729",
-                                    border_color=self.BORDER, button_color=self.BLUE,
-                                    dropdown_fg_color=self.PANEL)
+        kind.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 4))
+        report_id = ctk.CTkComboBox(
+            report_row, values=["Choose a record"], state="readonly", height=36,
+            fg_color="#0e1729", border_color=self.BORDER,
+            button_color=self.BLUE, dropdown_fg_color=self.PANEL,
+        )
         report_id.set("Choose a record")
         report_choices = {"Choose a record": None}
-        report_id.pack(side="left", padx=5, pady=20)
+        report_id.grid(row=1, column=1, sticky="ew", padx=5, pady=(0, 4))
+
         def refresh_report_choices(_value=None):
             nonlocal report_choices
             reference = "student" if kind.get() == "Student grade report" else "class"
@@ -925,17 +924,37 @@ class GradeManagementGUI(ctk.CTk):
             report_choices["Choose a record"] = None
             report_id.configure(values=labels)
             report_id.set("Choose a record")
+
         kind.configure(command=refresh_report_choices)
         refresh_report_choices()
-        self._button(report_row, "Show report", lambda: self._render_report(kind.get(), report_choices.get(report_id.get()), output), self.CYAN, "#081a1d")\
-            .pack(side="left", padx=5, pady=20)
 
         output_card = self._card(page, "OUTPUT  /  REPORT DETAILS")
         output_card.pack(fill="both", expand=True)
-        output = ctk.CTkTextbox(output_card, fg_color="#0e1729", text_color=self.TEXT,
-                                border_color=self.BORDER, border_width=1, corner_radius=9,
-                                font=ctk.CTkFont(family="Consolas", size=11), wrap="word")
-        output.pack(fill="both", expand=True, padx=14, pady=(6, 14))
+        report_header = ctk.CTkLabel(output_card, text="Select a report type and record, then choose Show report.",
+                                     text_color=self.MUTED, justify="left", anchor="w",
+                                     font=ctk.CTkFont(size=11), wraplength=1050)
+        report_header.pack(fill="x", padx=16, pady=(4, 8))
+        table_wrap = ctk.CTkFrame(output_card, fg_color="#0e1729", corner_radius=9,
+                                  border_width=1, border_color=self.BORDER)
+        table_wrap.pack(fill="both", expand=True, padx=14, pady=(0, 8))
+        report_table = ttk.Treeview(table_wrap, columns=(), show="headings", height=10)
+        report_table.pack(side="top", fill="both", expand=True, padx=5, pady=(5, 0))
+        ybar = ttk.Scrollbar(table_wrap, orient="vertical", command=report_table.yview)
+        ybar.place(relx=1.0, rely=0, relheight=1.0, anchor="ne")
+        xbar = ttk.Scrollbar(output_card, orient="horizontal", command=report_table.xview)
+        xbar.pack(fill="x", padx=17, pady=(0, 8))
+        report_table.configure(yscrollcommand=ybar.set, xscrollcommand=xbar.set)
+        report_summary = ctk.CTkLabel(output_card, text="", text_color=self.CYAN,
+                                      font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+                                      anchor="w", justify="left")
+        report_summary.pack(fill="x", padx=16, pady=(0, 12))
+
+        def display_report():
+            record_id = report_choices.get(report_id.get())
+            self._render_report(kind.get(), record_id, report_header, report_table, report_summary)
+
+        self._button(report_row, "Show report", display_report, self.CYAN, "#081a1d")\
+            .grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=(5, 4))
         self.content.grid_rowconfigure(0, weight=1)
 
     def _small_input(self, parent, label, width):
@@ -956,7 +975,7 @@ class GradeManagementGUI(ctk.CTk):
         combo.pack()
         return combo, choices
 
-    def _render_report(self, kind, ident, output):
+    def _render_report(self, kind, ident, heading, table, summary):
         if not ident or ident == "Choose a record":
             raise ValueError("Choose a class or student for this report.")
         if kind == "Class list":
@@ -965,6 +984,73 @@ class GradeManagementGUI(ctk.CTk):
             data = self.report_service.get_grade_sheet_report(ident)
         else:
             data = self.report_service.get_student_grade_report(ident)
-        output.delete("1.0", "end")
-        output.insert("end", f"{kind}\n{'─' * 48}\n\n{data}")
+        for item in table.get_children():
+            table.delete(item)
+        summary.configure(text="")
+
+        if kind in {"Class list", "Grade sheet"}:
+            header = data["header"]
+            semester = header["semester"]
+            semester = semester if "semester" in semester.lower() else semester + " Semester"
+            heading.configure(text=(
+                f"{header['subject_code']} — {header['subject_name']}  |  Section {header['section']}\n"
+                f"Teacher: {header['teacher_name']} — {header['department']}\n"
+                f"School Year: {header['school_year']}  |  {semester}  |  "
+                f"Schedule: {header['schedule'] or '—'}  |  Room: {header['room'] or '—'}"
+            ), text_color=self.TEXT)
+            if kind == "Class list":
+                columns = ("number", "student", "course")
+                headings = ("No.", "Student Name", "Course")
+                rows = [(index, f"{row['last_name']}, {row['first_name']}", row["program"])
+                        for index, row in enumerate(data["records"], 1)]
+            else:
+                columns = ("number", "student", "course", "midterm", "finals")
+                headings = ("No.", "Student", "Course", "MG", "FG")
+                rows = [(index, f"{row['last_name']}, {row['first_name']}", row["program"],
+                         self._report_value(row["midterm_equiv"]),
+                         self._report_value(row["final_equiv"]))
+                        for index, row in enumerate(data["records"], 1)]
+            table.configure(columns=columns)
+            for column, title in zip(columns, headings):
+                table.heading(column, text=title)
+            for column in columns:
+                table.column(column, width=110 if column in {"number", "course", "midterm", "finals"} else 260,
+                             minwidth=70, anchor="center" if column in {"number", "course", "midterm", "finals"} else "w",
+                             stretch=column in {"student"})
+            for row in rows:
+                table.insert("", "end", values=row)
+        else:
+            student = data["student"]
+            year_level = int(student["year_level"])
+            ordinal = f"{year_level}{'st' if year_level == 1 else 'nd' if year_level == 2 else 'rd' if year_level == 3 else 'th'} year"
+            heading.configure(text=(
+                f"Student Name: {student['last_name']}, {student['first_name']}  |  "
+                f"Course: {student['program']}  |  Year: {ordinal}"
+            ), text_color=self.TEXT)
+            columns = ("number", "code", "description", "teacher", "units", "grade")
+            headings = ("No.", "Subject Code", "Description", "Teacher", "Units", "F Grade")
+            table.configure(columns=columns)
+            for column, title in zip(columns, headings):
+                table.heading(column, text=title)
+            for column, width in zip(columns, (55, 125, 330, 190, 70, 90)):
+                table.column(column, width=width, minwidth=55,
+                             anchor="center" if column in {"number", "units", "grade"} else "w",
+                             stretch=column in {"description", "teacher"})
+            for index, row in enumerate(data["records"], 1):
+                table.insert("", "end", values=(
+                    index, row["subject_code"], row["description"], row["teacher_name"],
+                    row["units"], self._report_value(row["final_grade"]),
+                ))
+            gwa = self._report_value(data["gwa"])
+            summary.configure(text=f"Total Units: {data['total_units']}     "
+                                     f"No. of Subjects: {data['no_of_subjects']}     "
+                                     f"Grade Weighted Average: {gwa}")
+
+        if not table.get_children():
+            summary.configure(text="No records were found for this report." if not summary.cget("text")
+                              else summary.cget("text"))
+
+    @staticmethod
+    def _report_value(value):
+        return "Incomplete" if value is None else f"{float(value):.2f}"
 
