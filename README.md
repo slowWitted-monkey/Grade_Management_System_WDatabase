@@ -31,15 +31,15 @@ This Python and Tkinter project uses PostgreSQL for students, teachers, subjects
 
 The instructor's live demonstration checklist requires a blank database before the test data is entered. `seed_db.py` now creates missing tables only and does not add sample records.
 
-### Optional load-test data
+### Optional CRUD checklist fixture
 
-To explore the GUI, reports, and grade calculations with synthetic records, first point `.env` to a development database such as `MockDataBase2`. Then run:
+To explore the GUI, reports, and grade calculations with the professor's exact data, point `.env` to a development database such as `MockDataBase2`, then run:
 
 ```powershell
 python -m db.seed_load_test_data
 ```
 
-This adds 30 clearly labeled synthetic students, teachers, courses, classes, enrollments, grade components, weights, and scores. It never deletes rows. To add a different-sized set, use `python -m db.seed_load_test_data --students 60` (1–100 students). Records use `LOAD-` IDs and sample emails under `example.test`. Re-running on the same date does not duplicate those records. Do not run this against the blank database you plan to use for the professor's checklist.
+This inserts or refreshes the named checklist records: Juan, Pedro, Ana, Carlo, Kevin, Maria, Jose, CSPC 103, PATHFIT 3, both classes, the six grading components, all checklist scores, final weights, and computed grades. It matches the checklist's final report-ready state, including updates such as Ana's BSCS program, Maria's department, CSPC 103's room/schedule, Juan's corrected score, and the 30/30/40 Midterm weights. Scores are saved through the application's repository and grades are calculated by the application's grading service, creating audit entries. It never deletes rows, but it does reset those specific checklist fixture records to their listed values each time it runs. Add optional un-enrolled list/search records with `python -m db.seed_load_test_data --extra-students 30` (1–100). These extra students use `LOAD-` IDs. Do not use this seeded final state to score the live checklist's create/update scenarios; keep the required blank database for that demonstration.
 
 ## Test calculations
 
