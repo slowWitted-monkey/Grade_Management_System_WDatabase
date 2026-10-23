@@ -63,6 +63,8 @@ class GradeManagementGUI(ctk.CTk):
         self.grade_repo = GradeRepository()
         self.grading_service = GradingService(self.grade_repo)
         self.report_service = ReportService()
+        self._page_after_ids = set()
+        self._page_generation = 0
         self.status = tk.StringVar(value="Checking database…")
         self._configure_tree_style()
 
@@ -190,11 +192,37 @@ class GradeManagementGUI(ctk.CTk):
                              border_color="#2f5b92")
 
     def _set_page(self, title, nav_key):
+        self._page_generation += 1
+        for after_id in self._page_after_ids:
+            try:
+                self.after_cancel(after_id)
+            except tk.TclError:
+                pass
+        self._page_after_ids.clear()
         for child in self.content.winfo_children():
             child.destroy()
         self.page_title.configure(text=title)
         self._highlight_nav(nav_key)
         self.content.grid_rowconfigure(0, weight=0)
+
+    def _after_page(self, delay_ms, callback):
+        """Run a deferred page action only while its page is still active."""
+        generation = self._page_generation
+        after_id = None
+
+        def run():
+            if after_id is not None:
+                self._page_after_ids.discard(after_id)
+            if generation != self._page_generation:
+                return
+            try:
+                callback()
+            except tk.TclError:
+                # The page may have been closed while Tk was processing events.
+                return
+
+        after_id = self.after(delay_ms, run)
+        self._page_after_ids.add(after_id)
 
     def _section_intro(self, parent, heading, detail):
         ctk.CTkLabel(parent, text=heading, text_color=self.TEXT,
@@ -646,7 +674,7 @@ class GradeManagementGUI(ctk.CTk):
         self._button(search_row, "Clear search", clear_search, self.CARD_HOVER).pack(side="left")
         search_entry.bind("<Return>", search_records)
         tree.bind("<<TreeviewSelect>>", selected)
-        self.after(100, lambda: self._guard(refresh))
+        self._after_page(100, lambda: self._guard(refresh))
 
     def _button(self, parent, text, command, color=None, text_color=None):
         return ctk.CTkButton(parent, text=text, command=lambda: self._guard(command),
@@ -912,7 +940,7 @@ class GradeManagementGUI(ctk.CTk):
                      self.CARD_HOVER).pack(side="left", padx=4)
         class_filter.configure(command=lambda _value: self._guard(reload_saved_scores))
         score_tree.bind("<<TreeviewSelect>>", select_saved_score)
-        self.after(120, lambda: self._guard(reload_saved_scores))
+        self._after_page(120, lambda: self._guard(reload_saved_scores))
 
     def show_reports_page(self):
         self._set_page("Compute & Reports", "reports")
