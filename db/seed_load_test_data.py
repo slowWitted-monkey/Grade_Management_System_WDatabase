@@ -72,7 +72,7 @@ def seed_load_test_data(student_count: int = 30) -> dict[str, int]:
             counts["subjects"] = cur.rowcount
             cur.execute("SELECT subject_id, subject_code FROM subject WHERE subject_code = ANY(%s)",
                         (subject_codes,))
-            subject_ids = dict(cur.fetchall())
+            subject_ids = {code: ident for ident, code in cur.fetchall()}
 
             class_codes = [f"LOAD-{tag}-{n:02d}" for n in range(1, len(courses) + 1)]
             class_rows = []
@@ -90,7 +90,7 @@ def seed_load_test_data(student_count: int = 30) -> dict[str, int]:
             counts["classes"] = cur.rowcount
             cur.execute("SELECT class_id, class_code FROM class_offering WHERE class_code = ANY(%s)",
                         (class_codes,))
-            class_ids = dict(cur.fetchall())
+            class_ids = {code: ident for ident, code in cur.fetchall()}
 
             cur.executemany(
                 """INSERT INTO grading_period (name, period_order, school_year, semester)
@@ -102,7 +102,7 @@ def seed_load_test_data(student_count: int = 30) -> dict[str, int]:
                 "SELECT period_id, name FROM grading_period WHERE name = ANY(%s) AND school_year=%s AND semester=%s",
                 ([name for name, _order in period_names], term_year, semester),
             )
-            period_ids = dict(cur.fetchall())
+            period_ids = {name: ident for ident, name in cur.fetchall()}
 
             component_rows = []
             for period_name, _order in period_names:
