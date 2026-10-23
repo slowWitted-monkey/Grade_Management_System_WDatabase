@@ -1,145 +1,129 @@
 import psycopg2
+
 from config.database import get_db_connection
 
+
 class EnrolmentRepository:
-    def get_all_offering_ids(self) -> list:
+    def get_all_offering_ids(self):
         conn = get_db_connection()
-        cursor = conn.cursor()
         try:
-            cursor.execute("SELECT offering_id FROM classoffering ORDER BY offering_id ASC;")
-            rows = cursor.fetchall()
-            return [row['offering_id'] if isinstance(row, dict) else row[0] for row in rows]
-        except Exception as e:
-            print(f"Error fetching offering IDs: {e}")
-            return []
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT class_id FROM class_offering ORDER BY class_id")
+                return [str(row[0]) for row in cursor.fetchall()]
         finally:
-            cursor.close()
             conn.close()
 
-    def _get_valid_fallback_ids(self, cursor):
-        """Helper to retrieve existing subject_id and teacher_id to prevent foreign key errors."""
-        cursor.execute("SELECT subject_id FROM subject LIMIT 1;")
-        subj_row = cursor.fetchone()
-        valid_subj = subj_row['subject_id'] if isinstance(subj_row, dict) else (subj_row[0] if subj_row else None)
-
-        cursor.execute("SELECT teacher_id FROM teacher LIMIT 1;")
-        tch_row = cursor.fetchone()
-        valid_tch = tch_row['teacher_id'] if isinstance(tch_row, dict) else (tch_row[0] if tch_row else None)
-
-        return valid_subj, valid_tch
-
-    def _ensure_default_subject(self, cursor, subject_code_or_id: str) -> str:
-        """Finds an existing subject_id by ID or code, or safely inserts a unique record."""
-        cursor.execute(
-            "SELECT subject_id FROM subject WHERE subject_id = %s OR subject_code = %s LIMIT 1;",
-            (subject_code_or_id, subject_code_or_id)
-        )
-        subj_row = cursor.fetchone()
-        if subj_row:
-            return subj_row['subject_id'] if isinstance(subj_row, dict) else subj_row[0]
-
-        fallback_subj, _ = self._get_valid_fallback_ids(cursor)
-        if fallback_subj:
-            return fallback_subj
-
+    def get_classes(self):
+        conn = get_db_connection()
         try:
-            cursor.execute(
-                """
-                INSERT INTO subject (subject_id, subject_code, subject_name, units) 
-                VALUES (%s, %s, 'General Subject', 3) 
-                ON CONFLICT (subject_code) DO UPDATE SET subject_name = EXCLUDED.subject_name
-                RETURNING subject_id;
-                """,
-                (f"SUB_{subject_code_or_id}", subject_code_or_id)
-            )
-            res = cursor.fetchone()
-            return res['subject_id'] if isinstance(res, dict) else res[0]
+            with conn.cursor() as cursor:
+                cursor.execute("""SELECT co.class_id, co.class_code, co.section, s.subject_code,
+                    t.first_name || ' ' || t.last_name, co.school_year, co.semester, co.schedule, co.room
+                    FROM class_offering co JOIN subject s USING(subject_id) JOIN teacher t USING(teacher_id)
+                    ORDER BY co.class_code, co.section""")
+                return cursor.fetchall()
+        finally:
+            conn.close()
+
+    def save_offering(self, offering_id=None, teacher_id=None, subject_id=None, class_code=None,
+                      schedule=None, school_year=None, semester=None, section=None, room=None):
+        """Create a class using real subject/teacher records; never invent fallbacks."""
+        class_code = (class_code or offering_id or "").strip()
+        if not class_code or not teacher_id or not subject_id or not section or not school_year or not semester:
+            raise ValueError("Class code, subject, teacher, section, school year, and semester are required.")
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT subject_id FROM subject WHERE subject_code=%s OR subject_id::text=%s", (str(subject_id), str(subject_id)))
+                subject = cursor.fetchone()
+                if not subject:
+                    raise ValueError(f"Subject '{subject_id}' was not found.")
+                cursor.execute("""INSERT INTO class_offering
+                    (class_code, subject_id, teacher_id, section, school_year, semester, schedule, room)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING class_id""",
+                    (class_code, subject[0], teacher_id, section.strip(), school_year.strip(), semester.strip(), schedule, room))
+                class_id = cursor.fetchone()[0]
+            conn.commit()
+            return class_id
+        except psycopg2.errors.UniqueViolation as exc:
+            conn.rollback()
+            raise ValueError(f"Class code '{class_code}' already exists.") from exc
         except Exception:
-            cursor.execute("SELECT subject_id FROM subject LIMIT 1;")
-            res = cursor.fetchone()
-            return res['subject_id'] if isinstance(res, dict) else res[0]
-
-    def save_offering(
-            self,
-            offering_id: str,
-            teacher_id: str,
-            subject_id: str = "CS101",
-            class_code: str = None,
-            schedule: str = "TBA",
-            school_year: str = "2025-2026",
-            semester: str = "1st"
-    ) -> None:
-        """Inserts or updates a class offering in classoffering safely."""
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        if not class_code:
-            class_code = offering_id
-
-        try:
-            resolved_subject_id = self._ensure_default_subject(cursor, subject_id)
-
-            query = """
-                INSERT INTO classoffering (
-                    offering_id, class_code, schedule, school_year, semester, teacher_id, subject_id
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (offering_id) DO UPDATE SET
-                    class_code = EXCLUDED.class_code,
-                    teacher_id = EXCLUDED.teacher_id,
-                    subject_id = EXCLUDED.subject_id,
-                    school_year = EXCLUDED.school_year,
-                    semester = EXCLUDED.semester;
-            """
-            cursor.execute(query, (offering_id, class_code, schedule, school_year, semester, teacher_id, resolved_subject_id))
-            conn.commit()
-        except Exception as e:
             conn.rollback()
-            raise e
+            raise
         finally:
-            cursor.close()
             conn.close()
 
-    def enroll_student(self, enrollment_id: str, student_id: str, offering_id: str, status: str = "Enrolled"):
+    def enroll_student(self, enrollment_id, student_id, offering_id, status="Enrolled"):
+        """Create an enrollment; its database-generated ID is the authoritative ID."""
         conn = get_db_connection()
-        cursor = conn.cursor()
-
         try:
-            cursor.execute("SELECT offering_id FROM classoffering WHERE offering_id = %s;", (offering_id,))
-            if not cursor.fetchone():
-                valid_subj, valid_tch = self._get_valid_fallback_ids(cursor)
-
-                if not valid_subj:
-                    valid_subj = self._ensure_default_subject(cursor, "CS101")
-
-                if not valid_tch:
-                    cursor.execute(
-                        "INSERT INTO teacher (teacher_id, first_name, last_name, email, department, status) "
-                        "VALUES ('TCH001', 'Default', 'Teacher', 'teacher@ndmu.edu.ph', 'Computer Studies', 'Active') "
-                        "ON CONFLICT (teacher_id) DO NOTHING;"
-                    )
-                    valid_tch = 'TCH001'
-
-                cursor.execute("""
-                    INSERT INTO classoffering (
-                        offering_id, class_code, schedule, school_year, semester, teacher_id, subject_id
-                    )
-                    VALUES (%s, %s, 'TBA', '2025-2026', '1st', %s, %s)
-                    ON CONFLICT (offering_id) DO NOTHING;
-                """, (offering_id, offering_id, valid_tch, valid_subj))
-
-            query = """
-                INSERT INTO enrollment (enrollment_id, student_id, offering_id, status, enrollment_date)
-                VALUES (%s, %s, %s, %s, CURRENT_DATE);
-            """
-            cursor.execute(query, (enrollment_id, student_id, offering_id, status))
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT class_id FROM class_offering WHERE class_id::text=%s OR class_code=%s", (str(offering_id), str(offering_id)))
+                cls = cursor.fetchone()
+                if not cls:
+                    raise ValueError(f"Class offering '{offering_id}' was not found.")
+                cursor.execute("SELECT 1 FROM student WHERE student_id=%s", (student_id,))
+                if not cursor.fetchone():
+                    raise ValueError(f"Student '{student_id}' was not found.")
+                cursor.execute("""INSERT INTO enrollment (student_id, class_id, status)
+                    VALUES (%s,%s,%s) RETURNING enrollment_id""", (student_id, cls[0], status))
+                result = cursor.fetchone()[0]
             conn.commit()
-        except psycopg2.errors.UniqueViolation:
+            return result
+        except psycopg2.errors.UniqueViolation as exc:
             conn.rollback()
-            raise ValueError(f"Enrollment ID '{enrollment_id}' already exists!")
-        except Exception as e:
+            raise ValueError("This student is already enrolled in the selected class.") from exc
+        except Exception:
             conn.rollback()
-            raise e
+            raise
         finally:
-            cursor.close()
             conn.close()
 
+    def list_enrollments(self, class_id=None):
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                query = """SELECT e.enrollment_id, e.student_id, e.class_id, e.enroll_date, e.status,
+                    s.first_name, s.last_name FROM enrollment e JOIN student s USING(student_id)"""
+                params = ()
+                if class_id is not None:
+                    query += " WHERE e.class_id=%s"
+                    params = (class_id,)
+                cursor.execute(query + " ORDER BY s.last_name, s.first_name", params)
+                return cursor.fetchall()
+        finally:
+            conn.close()
+
+    def update_enrollment_status(self, enrollment_id, status):
+        if status not in {"Enrolled", "Dropped"}:
+            raise ValueError("Enrollment status must be Enrolled or Dropped.")
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("UPDATE enrollment SET status=%s WHERE enrollment_id=%s", (status, enrollment_id))
+                if not cursor.rowcount:
+                    raise ValueError("Enrollment was not found.")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def delete_enrollment(self, enrollment_id):
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM enrollment WHERE enrollment_id=%s", (enrollment_id,))
+                if not cursor.rowcount:
+                    raise ValueError("Enrollment was not found.")
+            conn.commit()
+        except psycopg2.errors.ForeignKeyViolation as exc:
+            conn.rollback()
+            raise ValueError("Enrollment cannot be removed while grade scores depend on it.") from exc
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()

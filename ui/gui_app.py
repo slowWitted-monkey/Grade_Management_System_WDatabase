@@ -1,1082 +1,1140 @@
-import re
+"""Modern dark dashboard for the student information and grading system."""
+
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox, ttk
 
-# Absolute imports from the project root
-from domain.student import Student
-from repository.student_repository import StudentRepository
-from repository.teacher_repository import TeacherRepository
-from repository.enrollment_repository import EnrolmentRepository
+import customtkinter as ctk
+
+from config.database import get_db_connection
 from repository.grade_repository import GradeRepository
-from service.report_service import ReportService
 from service.grading_service import GradingService
+from service.report_service import ReportService
 
 
-class GradeManagementGUI(tk.Tk):
-    # Modern Dark Theme Color Palette
-    BG_DARK = "#1E1E2E"
-    CARD_BG = "#2A2A3C"
-    ACCENT_BLUE = "#3B82F6"
-    ACCENT_HOVER = "#2563EB"
-    DANGER_RED = "#EF4444"
-    DANGER_HOVER = "#DC2626"
-    TEXT_LIGHT = "#F3F4F6"
-    TEXT_MUTED = "#9CA3AF"
-    ENTRY_BG = "#181825"
-    BORDER_COLOR = "#313244"
+class GradeManagementGUI(ctk.CTk):
+    """A dark, developer-inspired desktop UI backed by the existing services."""
+
+    BG = "#0b1020"
+    PANEL = "#111a2e"
+    CARD = "#151f35"
+    CARD_HOVER = "#1b2944"
+    BORDER = "#263550"
+    TEXT = "#e7eefc"
+    MUTED = "#8da0bf"
+    BLUE = "#4f8cff"
+    CYAN = "#39d6d0"
+    GREEN = "#32d296"
+    AMBER = "#f3b94f"
+    RED = "#fa7185"
+
+    TABLES = {
+        "Students": ("student", "student_id", ["student_id", "first_name", "last_name", "program", "year_level", "email", "status"]),
+        "Teachers": ("teacher", "teacher_id", ["teacher_id", "first_name", "last_name", "email", "department", "status"]),
+        "Subjects": ("subject", "subject_id", ["subject_id", "subject_code", "subject_name", "description", "units"]),
+        "Classes": ("class_offering", "class_id", ["class_id", "class_code", "subject_id", "teacher_id", "section", "school_year", "semester", "schedule", "room"]),
+        "Enrollments": ("enrollment", "enrollment_id", ["enrollment_id", "student_id", "class_id", "status"]),
+        "Grading Periods": ("grading_period", "period_id", ["period_id", "name", "period_order", "start_date", "end_date", "school_year", "semester"]),
+        "Grade Components": ("grade_component", "component_id", ["component_id", "period_id", "name", "type", "max_score", "description"]),
+    }
+
+    NAV_ITEMS = [
+        ("Overview", "overview"),
+        ("Students", "Students"),
+        ("Teachers", "Teachers"),
+        ("Subjects", "Subjects"),
+        ("Classes", "Classes"),
+        ("Enrollments", "Enrollments"),
+        ("Grading Periods", "Grading Periods"),
+        ("Grade Components", "Grade Components"),
+        ("Grade Weights", "weights"),
+        ("Score Entry", "scores"),
+        ("Compute & Reports", "reports"),
+    ]
 
     def __init__(self):
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("blue")
         super().__init__()
+        self.title("Grade Management System  |  Academic Workspace")
+        self.geometry("1450x900")
+        self.minsize(1120, 720)
+        self.configure(fg_color=self.BG)
 
-        # Instantiate grade_repository so self.grade_repository exists
-        self.grade_repository = GradeRepository()
-
-        self.title("LMSchoology - Advanced Student Grade Management System (PostgreSQL Connected)")
-        self.geometry("1160x780")
-        self.minsize(960, 680)
-        self.configure(bg=self.BG_DARK)
-
-        # Initialize Repositories and Services
-        self.student_repo = StudentRepository()
-        self.teacher_repo = TeacherRepository()
-        self.enrolment_repo = EnrolmentRepository()
         self.grade_repo = GradeRepository()
+        self.grading_service = GradingService(self.grade_repo)
         self.report_service = ReportService()
-        self.grading_service = GradingService()
+        self._page_after_ids = set()
+        self._page_generation = 0
+        self.status = tk.StringVar(value="Checking database…")
+        self._configure_tree_style()
 
-        # Configure Global Modern TTK Styles
-        self._setup_modern_styles()
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        self._build_sidebar()
+        self._build_workspace()
+        self.show_dashboard()
+        self.after(250, self.check_database)
 
-        # Build Header Container
-        self._build_header()
-
-        # ==============================================================
-        # CATEGORIZED HIERARCHICAL NAVIGATION (NESTED NOTEBOOKS)
-        # ==============================================================
-        self.main_notebook = ttk.Notebook(self)
-        self.main_notebook.pack(fill="both", expand=True, padx=20, pady=(0, 20))
-
-        # Main Category Frames
-        self.tab_master = ttk.Frame(self.main_notebook, style="Card.TFrame")
-        self.tab_classes_enr = ttk.Frame(self.main_notebook, style="Card.TFrame")
-        self.tab_grading_scores = ttk.Frame(self.main_notebook, style="Card.TFrame")
-        self.tab_reports_main = ttk.Frame(self.main_notebook, style="Card.TFrame")
-
-        # Register Main Category Tabs
-        self.main_notebook.add(self.tab_master, text="  Master Records  ")
-        self.main_notebook.add(self.tab_classes_enr, text="  Classes & Enrollment  ")
-        self.main_notebook.add(self.tab_grading_scores, text="  Grading & Scores  ")
-        self.main_notebook.add(self.tab_reports_main, text="  Reports  ")
-
-        # --- Sub-Tab 1: Master Records (Students, Teachers) ---
-        self.master_notebook = ttk.Notebook(self.tab_master)
-        self.master_notebook.pack(fill="both", expand=True, padx=10, pady=10)
-
-        self.sub_students = ttk.Frame(self.master_notebook, style="Card.TFrame")
-        self.sub_teachers = ttk.Frame(self.master_notebook, style="Card.TFrame")
-
-        self.master_notebook.add(self.sub_students, text=" Students ")
-        self.master_notebook.add(self.sub_teachers, text=" Teachers ")
-
-        # --- Sub-Tab 2: Classes & Enrollment ---
-        self.classes_notebook = ttk.Notebook(self.tab_classes_enr)
-        self.classes_notebook.pack(fill="both", expand=True, padx=10, pady=10)
-
-        self.sub_offerings = ttk.Frame(self.classes_notebook, style="Card.TFrame")
-        self.sub_enrollment = ttk.Frame(self.classes_notebook, style="Card.TFrame")
-
-        self.classes_notebook.add(self.sub_offerings, text=" Class Offerings ")
-        self.classes_notebook.add(self.sub_enrollment, text=" Student Enrollment ")
-
-        # --- Sub-Tab 3: Grading & Scores ---
-        self.grading_notebook = ttk.Notebook(self.tab_grading_scores)
-        self.grading_notebook.pack(fill="both", expand=True, padx=10, pady=10)
-
-        self.sub_comp_grade = ttk.Frame(self.grading_notebook, style="Card.TFrame")
-        self.sub_direct_grade = ttk.Frame(self.grading_notebook, style="Card.TFrame")
-
-        self.grading_notebook.add(self.sub_comp_grade, text=" Grade Computation ")
-        self.grading_notebook.add(self.sub_direct_grade, text=" Direct Grade Entry ")
-
-        # --- Sub-Tab 4: Reports ---
-        self.reports_notebook = ttk.Notebook(self.tab_reports_main)
-        self.reports_notebook.pack(fill="both", expand=True, padx=10, pady=10)
-
-        self.sub_rep_class_list = ttk.Frame(self.reports_notebook, style="Card.TFrame")
-        self.sub_rep_grade_sheet = ttk.Frame(self.reports_notebook, style="Card.TFrame")
-        self.sub_rep_student_report = ttk.Frame(self.reports_notebook, style="Card.TFrame")
-
-        self.reports_notebook.add(self.sub_rep_class_list, text=" Class List ")
-        self.reports_notebook.add(self.sub_rep_grade_sheet, text=" Class Grade Sheet ")
-        self.reports_notebook.add(self.sub_rep_student_report, text=" Student Report ")
-
-        # Initialize Layouts into their respective sub-containers
-        self._setup_student_mgmt_tab()
-        self._setup_teacher_mgmt_tab()
-        self._setup_offering_tab()
-        self._setup_enrollment_action_tab()
-        self._setup_grade_entry_tab()
-        self._setup_direct_grade_tab()
-        self._setup_class_list_tab()
-        self._setup_grade_sheet_tab()
-        self._setup_student_report_tab()
-
-        # Initial loading & sync across dropdowns
-        self.refresh_student_dropdowns()
-        self.refresh_teacher_dropdowns()
-        self.refresh_offering_comboboxes()
-
-    # ------------------------------------------------------------------
-    # STYLING & THEMING SETUP
-    # ------------------------------------------------------------------
-    def _setup_modern_styles(self):
+    def _configure_tree_style(self):
         style = ttk.Style(self)
-        style.theme_use("clam")
-
-        style.configure("TFrame", background=self.BG_DARK)
-        style.configure("Card.TFrame", background=self.CARD_BG, relief="flat")
-        style.configure("Card.TLabelframe", background=self.CARD_BG, bordercolor=self.BORDER_COLOR, relief="solid")
-        style.configure("Card.TLabelframe.Label", background=self.CARD_BG, foreground=self.TEXT_LIGHT, font=("Segoe UI", 10, "bold"))
-
-        style.configure("TLabel", background=self.CARD_BG, foreground=self.TEXT_LIGHT, font=("Segoe UI", 10))
-        style.configure("Header.TLabel", background=self.BG_DARK, foreground=self.TEXT_LIGHT, font=("Segoe UI", 15, "bold"))
-        style.configure("SubHeader.TLabel", background=self.BG_DARK, foreground=self.TEXT_MUTED, font=("Segoe UI", 9))
-
-        style.configure("TEntry", fieldbackground=self.ENTRY_BG, foreground=self.TEXT_LIGHT, insertcolor=self.TEXT_LIGHT, borderwidth=1, relief="solid")
-        style.configure("TCombobox", fieldbackground=self.ENTRY_BG, background=self.CARD_BG, foreground=self.TEXT_LIGHT, insertcolor=self.TEXT_LIGHT, borderwidth=1)
-        style.map("TCombobox", fieldbackground=[("readonly", self.ENTRY_BG)], selectbackground=[("readonly", self.ACCENT_BLUE)])
-
-        style.configure("Primary.TButton", background=self.ACCENT_BLUE, foreground="#FFFFFF", font=("Segoe UI", 10, "bold"), borderwidth=0, padding=(12, 6))
-        style.map("Primary.TButton", background=[("active", self.ACCENT_HOVER)])
-
-        style.configure("Danger.TButton", background=self.DANGER_RED, foreground="#FFFFFF", font=("Segoe UI", 10, "bold"), borderwidth=0, padding=(12, 6))
-        style.map("Danger.TButton", background=[("active", self.DANGER_HOVER)])
-
-        style.configure("TNotebook", background=self.BG_DARK, borderwidth=0)
-        style.configure("TNotebook.Tab", background=self.CARD_BG, foreground=self.TEXT_MUTED, padding=(12, 6), font=("Segoe UI", 9, "bold"), borderwidth=0)
-        style.map("TNotebook.Tab", background=[("selected", self.ACCENT_BLUE)], foreground=[("selected", "#FFFFFF")])
-
-        style.configure("Treeview", background=self.ENTRY_BG, foreground=self.TEXT_LIGHT, fieldbackground=self.ENTRY_BG, rowheight=28, font=("Segoe UI", 10), borderwidth=0)
-        style.configure("Treeview.Heading", background=self.CARD_BG, foreground=self.TEXT_LIGHT, font=("Segoe UI", 10, "bold"), borderwidth=0, padding=6)
-        style.map("Treeview", background=[("selected", self.ACCENT_BLUE)], foreground=[("selected", "#FFFFFF")])
-
-    def _build_header(self):
-        header_frame = ttk.Frame(self)
-        header_frame.pack(fill="x", padx=20, pady=(12, 8))
-
-        ttk.Label(header_frame, text="LMSchoology | Student Information & Grading System", style="Header.TLabel").pack(anchor="w")
-        ttk.Label(header_frame, text="Connected to PostgreSQL Database • Academic Administration Portal", style="SubHeader.TLabel").pack(anchor="w")
-
-    # ------------------------------------------------------------------
-    # DROPDOWN REFRESH HELPERS
-    # ------------------------------------------------------------------
-    def refresh_student_dropdowns(self):
         try:
-            students = self.student_repo.find_all()
-            student_ids = [s.student_id for s in students] if students else []
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure("Treeview", background=self.PANEL, fieldbackground=self.PANEL,
+                        foreground=self.TEXT, rowheight=34, borderwidth=0,
+                        font=("Segoe UI", 10))
+        style.configure("Treeview.Heading", background=self.CARD, foreground=self.MUTED,
+                        relief="flat", borderwidth=0, font=("Segoe UI Semibold", 9))
+        style.map("Treeview", background=[("selected", "#254b7e")],
+                  foreground=[("selected", "#ffffff")])
+        style.map("Treeview.Heading", background=[("active", self.CARD_HOVER)])
 
-            if hasattr(self, 'cmb_enr_student'):
-                self.cmb_enr_student['values'] = student_ids
-            if hasattr(self, 'cmb_man_student_id'):
-                self.cmb_man_student_id['values'] = student_ids
-            if hasattr(self, 'cmb_report_student_id'):
-                self.cmb_report_student_id['values'] = student_ids
+    def _build_sidebar(self):
+        side = ctk.CTkFrame(self, width=244, corner_radius=0, fg_color=self.PANEL,
+                            border_width=0)
+        side.grid(row=0, column=0, sticky="nsew")
+        side.grid_propagate(False)
+        side.grid_rowconfigure(2, weight=1)
 
-            if student_ids:
-                if hasattr(self, 'cmb_enr_student') and not self.cmb_enr_student.get():
-                    self.cmb_enr_student.set(student_ids[0])
-                if hasattr(self, 'cmb_man_student_id') and not self.cmb_man_student_id.get():
-                    self.cmb_man_student_id.set(student_ids[0])
-                if hasattr(self, 'cmb_report_student_id') and not self.cmb_report_student_id.get():
-                    self.cmb_report_student_id.set(student_ids[0])
-        except Exception as e:
-            print(f"Error refreshing student dropdowns: {e}")
+        brand = ctk.CTkFrame(side, fg_color="transparent")
+        brand.pack(fill="x", padx=20, pady=(25, 28))
+        badge = ctk.CTkFrame(brand, width=42, height=42, corner_radius=12,
+                             fg_color=self.BLUE)
+        badge.pack(side="left", padx=(0, 12))
+        badge.pack_propagate(False)
+        ctk.CTkLabel(badge, text="SG", text_color="white",
+                     font=ctk.CTkFont(family="Consolas", size=15, weight="bold")).pack(expand=True)
+        brand_text = ctk.CTkFrame(brand, fg_color="transparent")
+        brand_text.pack(side="left", fill="y")
+        ctk.CTkLabel(brand_text, text="GRADE // SYSTEM", text_color=self.TEXT,
+                     font=ctk.CTkFont(family="Consolas", size=13, weight="bold")).pack(anchor="w", pady=(2, 1))
+        ctk.CTkLabel(brand_text, text="ACADEMIC WORKSPACE", text_color=self.MUTED,
+                     font=ctk.CTkFont(size=9, weight="bold")).pack(anchor="w")
 
-    def refresh_teacher_dropdowns(self):
-        try:
-            if hasattr(self.teacher_repo, 'find_all'):
-                teachers = self.teacher_repo.find_all()
-                formatted_list = [f"{t.teacher_id} - {t.first_name} {t.last_name}" for t in teachers] if teachers else []
-            else:
-                formatted_list = []
-
-            if hasattr(self, 'cmb_offering_teacher'):
-                self.cmb_offering_teacher['values'] = formatted_list
-                if formatted_list and not self.cmb_offering_teacher.get():
-                    self.cmb_offering_teacher.set(formatted_list[0])
-        except Exception as e:
-            print(f"Error refreshing teacher dropdowns: {e}")
-
-    def refresh_offering_comboboxes(self):
-        try:
-            if hasattr(self.enrolment_repo, 'get_all_offering_ids'):
-                offering_ids = self.enrolment_repo.get_all_offering_ids()
-            else:
-                offering_ids = ["OFF001", "OFF002", "OFF003", "OFF004"]
-
-            if not offering_ids:
-                offering_ids = ["OFF001", "OFF002", "OFF003", "OFF004"]
-
-            if hasattr(self, 'cmb_enr_offering'):
-                self.cmb_enr_offering['values'] = offering_ids
-            if hasattr(self, 'cmb_man_offering_id'):
-                self.cmb_man_offering_id['values'] = offering_ids
-            if hasattr(self, 'cmb_offering_id_calc'):
-                self.cmb_offering_id_calc['values'] = offering_ids
-            if hasattr(self, 'cmb_offering_class'):
-                self.cmb_offering_class['values'] = offering_ids
-            if hasattr(self, 'cmb_offering_sheet'):
-                self.cmb_offering_sheet['values'] = offering_ids
-
-            # Update students list for calculation tab if offering options change
-            self.update_calc_students()
-        except Exception as e:
-            print(f"Error refreshing offering comboboxes: {e}")
-
-    def update_calc_students(self, event=None):
-        """Populate Student ID dropdown with students enrolled in the selected Offering ID."""
-        try:
-            if not hasattr(self, 'cmb_offering_id_calc') or not hasattr(self, 'cmb_calc_student_id'):
-                return
-            offering_id = self.cmb_offering_id_calc.get().strip()
-            if not offering_id:
-                return
-
-            from config.database import get_db_connection
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT s.student_id 
-                FROM student s 
-                JOIN enrollment e ON s.student_id = e.student_id 
-                WHERE e.offering_id = %s;
-            """, (offering_id,))
-            rows = cursor.fetchall()
-            student_ids = [row[0] for row in rows]
-            cursor.close()
-            conn.close()
-
-            self.cmb_calc_student_id['values'] = student_ids
-            if student_ids:
-                self.cmb_calc_student_id.set(student_ids[0])
-            else:
-                self.cmb_calc_student_id.set('')
-        except Exception as e:
-            print(f"Error updating calculation students: {e}")
-
-    # ------------------------------------------------------------------
-    # TAB 1.1: STUDENTS MANAGEMENT (Master Records -> Students)
-    # ------------------------------------------------------------------
-    def _setup_student_mgmt_tab(self):
-        form_frame = ttk.LabelFrame(self.sub_students, text=" Add / Update / Delete Student ", style="Card.TLabelframe")
-        form_frame.pack(fill="x", padx=15, pady=15)
-
-        form_grid = ttk.Frame(form_frame, style="Card.TFrame")
-        form_grid.pack(padx=15, pady=15, fill="x")
-
-        ttk.Label(form_grid, text="Student ID:").grid(row=0, column=0, padx=8, pady=8, sticky="w")
-        self.ent_std_id = ttk.Entry(form_grid, width=15)
-        self.ent_std_id.grid(row=0, column=1, padx=8, pady=8)
-
-        ttk.Label(form_grid, text="Program:").grid(row=1, column=0, padx=8, pady=8, sticky="w")
-        self.cmb_std_prog = ttk.Combobox(form_grid, width=13, values=["BSCS", "BSIT", "BSEMC", "BSIS"])
-        self.cmb_std_prog.set("BSCS")
-        self.cmb_std_prog.grid(row=1, column=1, padx=8, pady=8)
-
-        ttk.Label(form_grid, text="First Name:").grid(row=0, column=2, padx=8, pady=8, sticky="w")
-        self.ent_std_first = ttk.Entry(form_grid, width=18)
-        self.ent_std_first.grid(row=0, column=3, padx=8, pady=8)
-
-        ttk.Label(form_grid, text="Email:").grid(row=1, column=2, padx=8, pady=8, sticky="w")
-        self.ent_std_email = ttk.Entry(form_grid, width=18)
-        self.ent_std_email.grid(row=1, column=3, padx=8, pady=8)
-
-        ttk.Label(form_grid, text="Last Name:").grid(row=0, column=4, padx=8, pady=8, sticky="w")
-        self.ent_std_last = ttk.Entry(form_grid, width=18)
-        self.ent_std_last.grid(row=0, column=5, padx=8, pady=8)
-
-        ttk.Label(form_grid, text="Status:").grid(row=1, column=4, padx=8, pady=8, sticky="w")
-        self.cmb_std_status = ttk.Combobox(form_grid, width=16, values=["Enrolled", "Dropped", "Graduated", "Inactive"], state="readonly")
-        self.cmb_std_status.set("Enrolled")
-        self.cmb_std_status.grid(row=1, column=5, padx=8, pady=8)
-
-        btn_box = ttk.Frame(form_grid, style="Card.TFrame")
-        btn_box.grid(row=0, column=6, rowspan=2, padx=12, pady=8, sticky="e")
-
-        btn_save = ttk.Button(btn_box, text="Save Student", style="Primary.TButton", command=self._save_student)
-        btn_save.pack(side="top", pady=2, fill="x")
-
-        btn_delete = ttk.Button(btn_box, text="Delete Student", style="Danger.TButton", command=self._delete_student)
-        btn_delete.pack(side="top", pady=2, fill="x")
-
-        table_frame = ttk.Frame(self.sub_students, style="Card.TFrame")
-        table_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
-
-        columns = ("student_id", "first_name", "last_name", "program", "email", "status")
-        self.tree_students = ttk.Treeview(table_frame, columns=columns, show="headings")
-
-        headers = {
-            "student_id": "Student ID",
-            "first_name": "First Name",
-            "last_name": "Last Name",
-            "program": "Program",
-            "email": "Email Address",
-            "status": "Status"
-        }
-
-        for col_id, col_name in headers.items():
-            self.tree_students.heading(col_id, text=col_name)
-            self.tree_students.column(col_id, anchor="center" if col_id in ["student_id", "status", "program"] else "w")
-
-        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree_students.yview)
-        self.tree_students.configure(yscrollcommand=scrollbar.set)
-
-        self.tree_students.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        self.tree_students.bind("<<TreeviewSelect>>", self._on_student_select)
-        self._load_students_table()
-
-    def _on_student_select(self, event):
-        selected_item = self.tree_students.selection()
-        if selected_item:
-            item = self.tree_students.item(selected_item[0])
-            vals = item['values']
-            self.ent_std_id.delete(0, tk.END)
-            self.ent_std_id.insert(0, vals[0])
-            self.ent_std_first.delete(0, tk.END)
-            self.ent_std_first.insert(0, vals[1])
-            self.ent_std_last.delete(0, tk.END)
-            self.ent_std_last.insert(0, vals[2])
-            self.cmb_std_prog.set(vals[3])
-            self.ent_std_email.delete(0, tk.END)
-            self.ent_std_email.insert(0, vals[4])
-            self.cmb_std_status.set(vals[5])
-
-    def _save_student(self):
-        s_id = self.ent_std_id.get().strip()
-        f_name = self.ent_std_first.get().strip()
-        l_name = self.ent_std_last.get().strip()
-        prog = self.cmb_std_prog.get().strip()
-        email = self.ent_std_email.get().strip()
-        status = self.cmb_std_status.get().strip()
-
-        if not s_id or not f_name or not l_name:
-            messagebox.showwarning("Missing Data", "Student ID, First Name, and Last Name are required.")
-            return
-
-        if email and not re.match(r"[^@]+@[^@]+\.[^@]+", email):
-            messagebox.showwarning("Invalid Email", "Please enter a valid email address.")
-            return
-
-        try:
-            new_student = Student(
-                student_id=s_id,
-                first_name=f_name,
-                last_name=l_name,
-                email=email,
-                program=prog,
-                status=status
+        ctk.CTkLabel(side, text="WORKSPACE", text_color="#607390",
+                     font=ctk.CTkFont(family="Consolas", size=10, weight="bold"))\
+            .pack(anchor="w", padx=22, pady=(0, 9))
+        nav = ctk.CTkScrollableFrame(side, fg_color="transparent", corner_radius=0,
+                                     scrollbar_button_color=self.BORDER,
+                                     scrollbar_button_hover_color=self.MUTED)
+        nav.pack(fill="both", expand=True, padx=10)
+        self.nav_buttons = {}
+        for label, key in self.NAV_ITEMS:
+            button = ctk.CTkButton(
+                nav, text=label, anchor="w", height=38, corner_radius=9,
+                fg_color="transparent", hover_color=self.CARD_HOVER,
+                text_color=self.MUTED, font=ctk.CTkFont(size=12, weight="normal"),
+                command=lambda target=key: self.navigate(target),
             )
-            self.student_repo.save(new_student)
-            messagebox.showinfo("Success", f"Student '{s_id}' saved successfully!")
-            self._load_students_table()
-            self.refresh_student_dropdowns()
+            button.pack(fill="x", pady=2)
+            self.nav_buttons[key] = button
 
-            self.ent_std_id.delete(0, tk.END)
-            self.ent_std_first.delete(0, tk.END)
-            self.ent_std_last.delete(0, tk.END)
-            self.ent_std_email.delete(0, tk.END)
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
+        footer = ctk.CTkFrame(side, fg_color="transparent")
+        footer.pack(fill="x", padx=20, pady=17)
+        ctk.CTkFrame(footer, height=1, fg_color=self.BORDER).pack(fill="x", pady=(0, 12))
+        ctk.CTkLabel(footer, text="LOCAL POSTGRESQL", text_color=self.MUTED,
+                     font=ctk.CTkFont(family="Consolas", size=9, weight="bold")).pack(anchor="w")
+        self.side_status = ctk.CTkLabel(footer, textvariable=self.status,
+                                        text_color=self.AMBER, font=ctk.CTkFont(size=10),
+                                        wraplength=195, justify="left")
+        self.side_status.pack(anchor="w", pady=(5, 0))
 
-    def _delete_student(self):
-        s_id = self.ent_std_id.get().strip()
-        if not s_id:
-            messagebox.showwarning("Missing ID", "Please select or enter a Student ID to delete.")
-            return
+    def _build_workspace(self):
+        workspace = ctk.CTkFrame(self, fg_color=self.BG, corner_radius=0)
+        workspace.grid(row=0, column=1, sticky="nsew", padx=0, pady=0)
+        workspace.grid_columnconfigure(0, weight=1)
+        workspace.grid_rowconfigure(1, weight=1)
 
+        header = ctk.CTkFrame(workspace, fg_color=self.BG, corner_radius=0,
+                              height=88, border_width=0)
+        header.grid(row=0, column=0, sticky="ew", padx=30, pady=(20, 12))
+        header.grid_columnconfigure(0, weight=1)
+        title_box = ctk.CTkFrame(header, fg_color="transparent")
+        title_box.grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(title_box, text="ACADEMIC DATA / LOCAL INSTANCE", text_color=self.CYAN,
+                     font=ctk.CTkFont(family="Consolas", size=10, weight="bold")).pack(anchor="w")
+        self.page_title = ctk.CTkLabel(title_box, text="Overview", text_color=self.TEXT,
+                                       font=ctk.CTkFont(size=25, weight="bold"))
+        self.page_title.pack(anchor="w", pady=(4, 0))
+        self.db_badge = ctk.CTkLabel(header, text="●  CHECKING", text_color=self.AMBER,
+                                     fg_color=self.CARD, corner_radius=18, width=170, height=36,
+                                     font=ctk.CTkFont(family="Consolas", size=10, weight="bold"))
+        self.db_badge.grid(row=0, column=1, sticky="e", padx=(12, 9))
+        ctk.CTkButton(header, text="↻", width=40, height=38, corner_radius=10,
+                      fg_color=self.CARD, hover_color=self.CARD_HOVER,
+                      text_color=self.CYAN, font=ctk.CTkFont(size=19, weight="bold"),
+                      command=self.check_database).grid(row=0, column=2, sticky="e")
+
+        self.content = ctk.CTkFrame(workspace, fg_color="transparent", corner_radius=0)
+        self.content.grid(row=1, column=0, sticky="nsew", padx=30, pady=(0, 24))
+        self.content.grid_columnconfigure(0, weight=1)
+        self.content.grid_rowconfigure(0, weight=1)
+
+    def navigate(self, target):
+        if target == "overview":
+            self.show_dashboard()
+        elif target in self.TABLES:
+            self.show_crud_page(target)
+        elif target == "weights":
+            self.show_weights_page()
+        elif target == "scores":
+            self.show_scores_page()
+        elif target == "reports":
+            self.show_reports_page()
+
+    def _highlight_nav(self, key):
+        for item, button in self.nav_buttons.items():
+            active = item == key
+            button.configure(fg_color="#1b3152" if active else "transparent",
+                             text_color=self.CYAN if active else self.MUTED,
+                             border_width=1 if active else 0,
+                             border_color="#2f5b92")
+
+    def _set_page(self, title, nav_key):
+        self._page_generation += 1
+        for after_id in self._page_after_ids:
+            try:
+                self.after_cancel(after_id)
+            except tk.TclError:
+                pass
+        self._page_after_ids.clear()
+        for child in self.content.winfo_children():
+            child.destroy()
+        self.page_title.configure(text=title)
+        self._highlight_nav(nav_key)
+        self.content.grid_rowconfigure(0, weight=0)
+
+    def _after_page(self, delay_ms, callback):
+        """Run a deferred page action only while its page is still active."""
+        generation = self._page_generation
+        after_id = None
+
+        def run():
+            if after_id is not None:
+                self._page_after_ids.discard(after_id)
+            if generation != self._page_generation:
+                return
+            try:
+                callback()
+            except tk.TclError:
+                # The page may have been closed while Tk was processing events.
+                return
+
+        after_id = self.after(delay_ms, run)
+        self._page_after_ids.add(after_id)
+
+    def _section_intro(self, parent, heading, detail):
+        ctk.CTkLabel(parent, text=heading, text_color=self.TEXT,
+                     font=ctk.CTkFont(size=18, weight="bold")).pack(anchor="w")
+        ctk.CTkLabel(parent, text=detail, text_color=self.MUTED,
+                     font=ctk.CTkFont(size=11), wraplength=900,
+                     justify="left").pack(anchor="w", pady=(4, 14))
+
+    def show_dashboard(self):
+        self._set_page("Overview", "overview")
+        page = ctk.CTkScrollableFrame(self.content, fg_color="transparent",
+                                      scrollbar_button_color=self.BORDER)
+        page.grid(row=0, column=0, sticky="nsew")
+        for col in range(4):
+            page.grid_columnconfigure(col, weight=1, uniform="metric")
+        ctk.CTkLabel(page, text="Your grading workspace, at a glance.",
+                     text_color=self.MUTED, font=ctk.CTkFont(size=13))\
+            .grid(row=0, column=0, columnspan=4, sticky="w", pady=(5, 18))
+
+        metrics = [("STUDENTS", "student", self.BLUE),
+                   ("TEACHERS", "teacher", self.CYAN),
+                   ("CLASSES", "class_offering", self.GREEN),
+                   ("ENROLLMENTS", "enrollment", self.AMBER)]
+        for col, (label, table, accent) in enumerate(metrics):
+            card = ctk.CTkFrame(page, fg_color=self.CARD, corner_radius=14,
+                                border_width=1, border_color=self.BORDER)
+            card.grid(row=1, column=col, sticky="ew", padx=(0 if col == 0 else 8, 0), pady=(0, 17))
+            ctk.CTkLabel(card, text="▰  " + label, text_color=self.MUTED,
+                         font=ctk.CTkFont(family="Consolas", size=10, weight="bold"))\
+                .pack(anchor="w", padx=16, pady=(15, 2))
+            value = self._count(table)
+            ctk.CTkLabel(card, text=value, text_color=accent,
+                         font=ctk.CTkFont(family="Consolas", size=29, weight="bold"))\
+                .pack(anchor="w", padx=16, pady=(2, 14))
+
+        info = ctk.CTkFrame(page, fg_color=self.CARD, corner_radius=14,
+                            border_width=1, border_color=self.BORDER)
+        info.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=(0, 8), pady=(0, 12))
+        ctk.CTkLabel(info, text="// GET STARTED", text_color=self.CYAN,
+                     font=ctk.CTkFont(family="Consolas", size=11, weight="bold"))\
+            .pack(anchor="w", padx=20, pady=(18, 5))
+        ctk.CTkLabel(info, text="Build your class data in a simple sequence:",
+                     text_color=self.TEXT, font=ctk.CTkFont(size=15, weight="bold"))\
+            .pack(anchor="w", padx=20, pady=(0, 12))
+        steps = ["01   Add students, teachers, and subjects",
+                 "02   Create class offerings, then enroll students",
+                 "03   Set periods, components, and weights",
+                 "04   Enter scores, compute grades, view reports"]
+        for step in steps:
+            ctk.CTkLabel(info, text=step, text_color=self.MUTED,
+                         font=ctk.CTkFont(family="Consolas", size=11))\
+                .pack(anchor="w", padx=22, pady=5)
+        ctk.CTkFrame(info, fg_color="transparent", height=10).pack()
+
+        quick = ctk.CTkFrame(page, fg_color=self.CARD, corner_radius=14,
+                             border_width=1, border_color=self.BORDER)
+        quick.grid(row=2, column=2, columnspan=2, sticky="nsew", padx=(8, 0), pady=(0, 12))
+        ctk.CTkLabel(quick, text="// QUICK NAVIGATION", text_color=self.CYAN,
+                     font=ctk.CTkFont(family="Consolas", size=11, weight="bold"))\
+            .pack(anchor="w", padx=20, pady=(18, 12))
+        for label, key in (("Open Students", "Students"), ("Open Classes", "Classes"),
+                           ("Configure Grade Weights", "weights"), ("Compute & Reports", "reports")):
+            ctk.CTkButton(quick, text=label + "   →", anchor="w", height=37,
+                          fg_color="transparent", hover_color=self.CARD_HOVER,
+                          text_color=self.TEXT, corner_radius=8,
+                          command=lambda target=key: self.navigate(target))\
+                .pack(fill="x", padx=12, pady=2)
+        self.content.grid_rowconfigure(0, weight=1)
+
+    def _count(self, table):
         try:
-            from config.database import get_db_connection
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM enrollment WHERE student_id = %s;", (s_id,))
-            enrollment_count = cursor.fetchone()[0]
-            cursor.close()
+            rows = self._query(f"SELECT COUNT(*) FROM {table}")
+            return str(rows[0][0])
+        except Exception:
+            return "—"
+
+    def _db(self):
+        return get_db_connection()
+
+    def _query(self, sql, params=(), fetch=True):
+        conn = self._db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                result = cur.fetchall() if fetch else None
+            conn.commit()
+            return result
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
             conn.close()
 
-            if enrollment_count > 0:
-                messagebox.showerror(
-                    "Deletion Blocked (ST-07)",
-                    f"Cannot delete Student '{s_id}' because they have active course enrollments and grade records.\n\nPlease remove their enrollments first if deletion is required."
+    def _reference_options(self, kind):
+        """Return database-backed (stored value, display label) choices."""
+        common_values = {
+            "program": ["BSCS", "BSIT"],
+            "department": ["Computer Studies Department", "Information Technology Department",
+                           "Physical Education Department"],
+        }
+        if kind in common_values:
+            table = "student" if kind == "program" else "teacher"
+            try:
+                rows = self._query(
+                    f"SELECT DISTINCT {kind} FROM {table} WHERE {kind} IS NOT NULL "
+                    f"AND btrim({kind}) <> '' ORDER BY {kind}"
                 )
-                return
-
-            confirm = messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete student '{s_id}'?\nThis action cannot be undone.")
-            if not confirm:
-                return
-
-            if hasattr(self.student_repo, 'delete'):
-                self.student_repo.delete(s_id)
-            else:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM student WHERE student_id = %s;", (s_id,))
-                conn.commit()
-                cursor.close()
-                conn.close()
-
-            messagebox.showinfo("Success", f"Student '{s_id}' deleted successfully!")
-            self._load_students_table()
-            self.refresh_student_dropdowns()
-
-            self.ent_std_id.delete(0, tk.END)
-            self.ent_std_first.delete(0, tk.END)
-            self.ent_std_last.delete(0, tk.END)
-            self.ent_std_email.delete(0, tk.END)
-        except Exception as e:
-            messagebox.showerror("Delete Error", str(e))
-
-    def _load_students_table(self):
-        for row in self.tree_students.get_children():
-            self.tree_students.delete(row)
-
-        students = self.student_repo.find_all()
-        for s in students:
-            self.tree_students.insert("", "end", values=(s.student_id, s.first_name, s.last_name, s.program, s.email, s.status))
-
-    # ------------------------------------------------------------------
-    # TAB 1.2: TEACHER RECORDS MANAGEMENT (Master Records -> Teachers)
-    # ------------------------------------------------------------------
-    def _setup_teacher_mgmt_tab(self):
-        form_frame = ttk.LabelFrame(self.sub_teachers, text=" Add / Update Teacher Record ", style="Card.TLabelframe")
-        form_frame.pack(fill="x", padx=15, pady=15)
-
-        form_grid = ttk.Frame(form_frame, style="Card.TFrame")
-        form_grid.pack(padx=15, pady=15, fill="x")
-
-        ttk.Label(form_grid, text="Teacher ID:").grid(row=0, column=0, padx=8, pady=8, sticky="w")
-        self.ent_tch_id = ttk.Entry(form_grid, width=15)
-        self.ent_tch_id.grid(row=0, column=1, padx=8, pady=8)
-
-        ttk.Label(form_grid, text="First Name:").grid(row=0, column=2, padx=8, pady=8, sticky="w")
-        self.ent_tch_first = ttk.Entry(form_grid, width=18)
-        self.ent_tch_first.grid(row=0, column=3, padx=8, pady=8)
-
-        ttk.Label(form_grid, text="Last Name:").grid(row=0, column=4, padx=8, pady=8, sticky="w")
-        self.ent_tch_last = ttk.Entry(form_grid, width=18)
-        self.ent_tch_last.grid(row=0, column=5, padx=8, pady=8)
-
-        ttk.Label(form_grid, text="Email:").grid(row=1, column=0, padx=8, pady=8, sticky="w")
-        self.ent_tch_email = ttk.Entry(form_grid, width=18)
-        self.ent_tch_email.grid(row=1, column=1, padx=8, pady=8)
-
-        ttk.Label(form_grid, text="Department:").grid(row=1, column=2, padx=8, pady=8, sticky="w")
-        self.ent_tch_dept = ttk.Entry(form_grid, width=18)
-        self.ent_tch_dept.insert(0, "Computer Studies")
-        self.ent_tch_dept.grid(row=1, column=3, padx=8, pady=8)
-
-        btn_save_tch = ttk.Button(form_grid, text="Save Teacher", style="Primary.TButton", command=self._save_teacher)
-        btn_save_tch.grid(row=1, column=5, padx=12, pady=8, sticky="e")
-
-        table_frame = ttk.Frame(self.sub_teachers, style="Card.TFrame")
-        table_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
-
-        columns = ("teacher_id", "first_name", "last_name", "email", "department")
-        self.tree_teachers = ttk.Treeview(table_frame, columns=columns, show="headings")
-
-        headers = {
-            "teacher_id": "Teacher ID",
-            "first_name": "First Name",
-            "last_name": "Last Name",
-            "email": "Email Address",
-            "department": "Department"
+                values = {str(row[0]) for row in rows}
+            except Exception:
+                values = set()
+            values.update(common_values[kind])
+            return [(value, value) for value in sorted(values, key=str.casefold)]
+        queries = {
+            "student": """SELECT student_id, student_id || ' — ' || first_name || ' ' || last_name
+                FROM student ORDER BY last_name, first_name""",
+            "teacher": """SELECT teacher_id, teacher_id || ' — ' || first_name || ' ' || last_name
+                FROM teacher ORDER BY last_name, first_name""",
+            "subject": """SELECT subject_id, subject_code || ' — ' || subject_name
+                FROM subject ORDER BY subject_code""",
+            "class": """SELECT co.class_id, co.class_code || ' — ' || s.subject_code || ' / Section ' || co.section
+                || ' / ' || co.school_year || ' ' || co.semester
+                FROM class_offering co JOIN subject s USING(subject_id) ORDER BY co.class_code""",
+            "period": """SELECT period_id, name || ' — ' || school_year || ' ' || semester
+                FROM grading_period ORDER BY school_year, semester, period_order""",
+            "component": """SELECT gc.component_id, gc.component_id::text || ' — ' || gc.name || ' / ' || gp.name || ' (' || gc.max_score || ' max)'
+                FROM grade_component gc JOIN grading_period gp USING(period_id)
+                ORDER BY gp.school_year, gp.semester, gp.period_order, gc.component_id""",
+            "enrollment": """SELECT e.enrollment_id, e.enrollment_id::text || ' — ' || st.student_id || ' '
+                || st.first_name || ' ' || st.last_name || ' / ' || co.class_code
+                FROM enrollment e JOIN student st USING(student_id)
+                JOIN class_offering co USING(class_id) ORDER BY st.last_name, st.first_name, co.class_code""",
         }
-
-        for col_id, col_name in headers.items():
-            self.tree_teachers.heading(col_id, text=col_name)
-            self.tree_teachers.column(col_id, anchor="center" if col_id in ["teacher_id", "department"] else "w")
-
-        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree_teachers.yview)
-        self.tree_teachers.configure(yscrollcommand=scrollbar.set)
-
-        self.tree_teachers.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        self.tree_teachers.bind("<<TreeviewSelect>>", self._on_teacher_select)
-        self._load_teachers_table()
-
-    def _on_teacher_select(self, event):
-        selected_item = self.tree_teachers.selection()
-        if selected_item:
-            item = self.tree_teachers.item(selected_item[0])
-            vals = item['values']
-            self.ent_tch_id.delete(0, tk.END)
-            self.ent_tch_id.insert(0, vals[0])
-            self.ent_tch_first.delete(0, tk.END)
-            self.ent_tch_first.insert(0, vals[1])
-            self.ent_tch_last.delete(0, tk.END)
-            self.ent_tch_last.insert(0, vals[2])
-            self.ent_tch_email.delete(0, tk.END)
-            self.ent_tch_email.insert(0, vals[3])
-            self.ent_tch_dept.delete(0, tk.END)
-            self.ent_tch_dept.insert(0, vals[4])
-
-    def _save_teacher(self):
-        t_id = self.ent_tch_id.get().strip()
-        f_name = self.ent_tch_first.get().strip()
-        l_name = self.ent_tch_last.get().strip()
-        email = self.ent_tch_email.get().strip()
-        dept = self.ent_tch_dept.get().strip()
-
-        if not t_id or not f_name or not l_name:
-            messagebox.showwarning("Missing Data", "Teacher ID, First Name, and Last Name are required.")
-            return
-
+        if kind in {"active_class"}:
+            query = queries["class"].replace("FROM class_offering co JOIN subject s USING(subject_id)",
+                "FROM class_offering co JOIN subject s USING(subject_id) WHERE EXISTS "
+                "(SELECT 1 FROM enrollment e WHERE e.class_id=co.class_id AND e.status='Enrolled')")
+        else:
+            query = queries.get(kind)
+        if not query:
+            return []
         try:
-            self.teacher_repo.save(t_id, f_name, l_name, email, dept)
-            messagebox.showinfo("Success", f"Teacher '{t_id}' saved successfully!")
-            self._load_teachers_table()
-            self.refresh_teacher_dropdowns()
+            return [(str(value), str(label)) for value, label in self._query(query)]
+        except Exception:
+            return []
 
-            self.ent_tch_id.delete(0, tk.END)
-            self.ent_tch_first.delete(0, tk.END)
-            self.ent_tch_last.delete(0, tk.END)
-            self.ent_tch_email.delete(0, tk.END)
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
+    def _choice_definitions(self, table):
+        """Map form fields to database choices or fixed, validated options."""
+        foreign_keys = {
+            ("class_offering", "subject_id"): "subject",
+            ("class_offering", "teacher_id"): "teacher",
+            ("enrollment", "student_id"): "student",
+            ("enrollment", "class_id"): "class",
+            ("grade_component", "period_id"): "period",
+        }
+        definitions = {}
+        if table == "student":
+            definitions["program"] = self._reference_options("program")
+        elif table == "teacher":
+            definitions["department"] = self._reference_options("department")
+        for (owner, field), reference in foreign_keys.items():
+            if owner == table:
+                definitions[field] = self._reference_options(reference)
+        if table in {"student", "teacher"}:
+            definitions["status"] = [("Active", "Active"), ("Inactive", "Inactive")]
+        elif table == "enrollment":
+            definitions["status"] = [("Enrolled", "Enrolled"), ("Dropped", "Dropped"), ("Completed", "Completed")]
+        elif table == "grade_component":
+            definitions["type"] = [(value, value) for value in ("Quiz", "Assignment", "Laboratory", "Project", "Exam", "Other")]
+        elif table == "class_offering":
+            definitions["semester"] = [("1st", "1st Semester"), ("2nd", "2nd Semester"), ("Summer", "Summer")]
+        if table == "student":
+            definitions["year_level"] = [(str(n), f"{n} — {n}{'st' if n == 1 else 'nd' if n == 2 else 'rd' if n == 3 else 'th'} year") for n in range(1, 9)]
+        return definitions
 
-    def _load_teachers_table(self):
-        for row in self.tree_teachers.get_children():
-            self.tree_teachers.delete(row)
+    def _make_combo(self, parent, options, *, default=None, width=None, height=35, editable=False):
+        """Create a dropdown and a display-label-to-stored-value map."""
+        label_to_value = {label: value for value, label in options}
+        placeholder = "Choose an available record"
+        values = [placeholder] + list(label_to_value)
+        combo = ctk.CTkComboBox(
+            parent, values=values, state="normal" if editable else "readonly", height=height,
+            width=width or 220, fg_color="#0e1729", border_color=self.BORDER,
+            button_color=self.BLUE, dropdown_fg_color=self.PANEL,
+        )
+        label_to_value[placeholder] = None
+        chosen = next((label for value, label in options if str(value) == str(default)), placeholder)
+        combo.set(chosen)
+        return combo, label_to_value
 
+    def check_database(self):
         try:
-            if hasattr(self.teacher_repo, 'find_all'):
-                teachers = self.teacher_repo.find_all()
-                for t in teachers:
-                    self.tree_teachers.insert("", "end", values=(t.teacher_id, t.first_name, t.last_name, t.email, t.department))
-        except Exception as e:
-            print("Error loading teachers table:", e)
-
-    # ------------------------------------------------------------------
-    # TAB 2.1: CLASS OFFERINGS (Classes & Enrollment -> Class Offerings)
-    # ------------------------------------------------------------------
-    def _setup_offering_tab(self):
-        offering_frame = ttk.LabelFrame(self.sub_offerings, text=" Assign Teacher to Class Offering ", style="Card.TLabelframe")
-        offering_frame.pack(fill="x", padx=15, pady=20)
-
-        grid_o = ttk.Frame(offering_frame, style="Card.TFrame")
-        grid_o.pack(padx=20, pady=20, fill="x")
-
-        ttk.Label(grid_o, text="Offering ID:").grid(row=0, column=0, padx=8, pady=8, sticky="w")
-        self.ent_offering_id = ttk.Entry(grid_o, width=15)
-        self.ent_offering_id.insert(0, "OFF001")
-        self.ent_offering_id.grid(row=0, column=1, padx=8, pady=8)
-
-        ttk.Label(grid_o, text="Assigned Teacher:").grid(row=0, column=2, padx=8, pady=8, sticky="w")
-        self.cmb_offering_teacher = ttk.Combobox(grid_o, width=28, state="readonly")
-        self.cmb_offering_teacher.grid(row=0, column=3, padx=8, pady=8)
-
-        ttk.Label(grid_o, text="Subject Code:").grid(row=0, column=4, padx=8, pady=8, sticky="w")
-        self.ent_offering_subject = ttk.Entry(grid_o, width=15)
-        self.ent_offering_subject.insert(0, "CS101")
-        self.ent_offering_subject.grid(row=0, column=5, padx=8, pady=8)
-
-        btn_save_offering = ttk.Button(grid_o, text="Save Offering", style="Primary.TButton", command=self._save_offering_action)
-        btn_save_offering.grid(row=0, column=6, padx=15, pady=8)
-
-    # ------------------------------------------------------------------
-    # TAB 2.2: STUDENT ENROLLMENT (Classes & Enrollment -> Student Enrollment)
-    # ------------------------------------------------------------------
-    def _setup_enrollment_action_tab(self):
-        offering_options = ["OFF001", "OFF002", "OFF003", "OFF004"]
-
-        enroll_frame = ttk.LabelFrame(self.sub_enrollment, text=" Enroll Student in Course Offering ", style="Card.TLabelframe")
-        enroll_frame.pack(fill="x", padx=15, pady=20)
-
-        grid_e = ttk.Frame(enroll_frame, style="Card.TFrame")
-        grid_e.pack(padx=20, pady=20, fill="x")
-
-        ttk.Label(grid_e, text="Enrollment ID:").grid(row=0, column=0, padx=8, pady=8, sticky="w")
-        self.ent_enr_id = ttk.Entry(grid_e, width=15)
-        self.ent_enr_id.insert(0, "ENR003")
-        self.ent_enr_id.grid(row=0, column=1, padx=8, pady=8)
-
-        ttk.Label(grid_e, text="Student ID:").grid(row=0, column=2, padx=8, pady=8, sticky="w")
-        self.cmb_enr_student = ttk.Combobox(grid_e, width=18)
-        self.cmb_enr_student.grid(row=0, column=3, padx=8, pady=8)
-
-        ttk.Label(grid_e, text="Offering ID:").grid(row=0, column=4, padx=8, pady=8, sticky="w")
-        self.cmb_enr_offering = ttk.Combobox(grid_e, width=15, values=offering_options)
-        self.cmb_enr_offering.set("OFF001")
-        self.cmb_enr_offering.grid(row=0, column=5, padx=8, pady=8)
-
-        btn_enroll = ttk.Button(grid_e, text="Enroll Student", style="Primary.TButton", command=self._enroll_student_action)
-        btn_enroll.grid(row=0, column=6, padx=15, pady=8)
-
-    def _save_offering_action(self):
-        off_id = self.ent_offering_id.get().strip()
-        teacher_str = self.cmb_offering_teacher.get().strip()
-        subject_id = self.ent_offering_subject.get().strip()
-
-        if not off_id or not teacher_str or not subject_id:
-            messagebox.showwarning("Missing Information", "Offering ID, Assigned Teacher, and Subject Code are required.")
-            return
-
-        teacher_id = teacher_str.split(" - ")[0] if " - " in teacher_str else teacher_str
-
-        try:
-            if hasattr(self.enrolment_repo, 'save_offering'):
-                self.enrolment_repo.save_offering(
-                    offering_id=off_id,
-                    teacher_id=teacher_id,
-                    subject_id=subject_id
-                )
-            else:
-                from config.database import get_db_connection
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO classoffering (
-                        offering_id, class_code, schedule, school_year, semester, teacher_id, subject_id
-                    )
-                    VALUES (%s, %s, 'TBA', '2025-2026', '1st', %s, %s)
-                    ON CONFLICT (offering_id) DO UPDATE SET
-                        teacher_id = EXCLUDED.teacher_id,
-                        subject_id = EXCLUDED.subject_id;
-                """, (off_id, off_id, teacher_id, subject_id))
-                conn.commit()
-                cursor.close()
-                conn.close()
-
-            self.refresh_offering_comboboxes()
-            messagebox.showinfo("Success", f"Class Offering '{off_id}' saved successfully!")
-        except Exception as e:
-            messagebox.showerror("Offering Error", str(e))
-
-    def _enroll_student_action(self):
-        enr_id = self.ent_enr_id.get().strip()
-        std_id = self.cmb_enr_student.get().strip()
-        off_id = self.cmb_enr_offering.get().strip()
-
-        if not enr_id or not std_id or not off_id:
-            messagebox.showwarning("Missing Information", "Enrollment ID, Student ID, and Offering ID are required.")
-            return
-
-        try:
-            self.enrolment_repo.enroll_student(enr_id, std_id, off_id)
-            self.refresh_offering_comboboxes()
-            self.update_calc_students()
-            messagebox.showinfo("Success", f"Student '{std_id}' enrolled into '{off_id}' successfully!")
-        except Exception as e:
-            messagebox.showerror("Enrollment Error", str(e))
-
-    # ------------------------------------------------------------------
-    # TAB 3.1: GRADE COMPUTATION & COMPONENT SCORES (Grading & Scores)
-    # ------------------------------------------------------------------
-    def _setup_grade_entry_tab(self):
-        frame = ttk.LabelFrame(self.sub_comp_grade, text=" Component Score Entry & Grade Computation ", style="Card.TLabelframe")
-        frame.pack(padx=20, pady=20, fill="both", expand=True)
-
-        inner_frame = ttk.Frame(frame, style="Card.TFrame")
-        inner_frame.pack(padx=20, pady=15, fill="x")
-
-        ttk.Label(inner_frame, text="Offering ID:").grid(row=0, column=0, padx=8, pady=8, sticky="w")
-        self.cmb_offering_id_calc = ttk.Combobox(inner_frame, width=15, values=["OFF001", "OFF002", "OFF003", "OFF004"])
-        self.cmb_offering_id_calc.set("OFF001")
-        self.cmb_offering_id_calc.grid(row=0, column=1, padx=8, pady=8, sticky="w")
-        self.cmb_offering_id_calc.bind("<<ComboboxSelected>>", self.update_calc_students)
-
-        ttk.Label(inner_frame, text="Student ID:").grid(row=0, column=2, padx=8, pady=8, sticky="w")
-        self.cmb_calc_student_id = ttk.Combobox(inner_frame, width=15)
-        self.cmb_calc_student_id.grid(row=0, column=3, padx=8, pady=8, sticky="w")
-
-        ttk.Label(inner_frame, text="Grading Period:").grid(row=0, column=4, padx=8, pady=8, sticky="w")
-        self.cmb_calc_period = ttk.Combobox(inner_frame, width=15, values=["Midterm", "Finals"], state="readonly")
-        self.cmb_calc_period.set("Midterm")
-        self.cmb_calc_period.grid(row=0, column=5, padx=8, pady=8, sticky="w")
-
-        scores_frame = ttk.LabelFrame(frame, text=" Raw Component Scores & Maximum Limits ", style="Card.TLabelframe")
-        scores_frame.pack(padx=20, pady=15, fill="x")
-
-        s_grid = ttk.Frame(scores_frame, style="Card.TFrame")
-        s_grid.pack(padx=15, pady=15, fill="x")
-
-        ttk.Label(s_grid, text="Quiz Score (Max: 50):").grid(row=0, column=0, padx=8, pady=8, sticky="w")
-        self.ent_score_quiz = ttk.Entry(s_grid, width=15)
-        self.ent_score_quiz.insert(0, "40")
-        self.ent_score_quiz.grid(row=0, column=1, padx=8, pady=8)
-
-        ttk.Label(s_grid, text="Lab / Project (Max: 100):").grid(row=0, column=2, padx=8, pady=8, sticky="w")
-        self.ent_score_lab = ttk.Entry(s_grid, width=15)
-        self.ent_score_lab.insert(0, "90")
-        self.ent_score_lab.grid(row=0, column=3, padx=8, pady=8)
-
-        ttk.Label(s_grid, text="Examination (Max: 100):").grid(row=0, column=4, padx=8, pady=8, sticky="w")
-        self.ent_score_exam = ttk.Entry(s_grid, width=15)
-        self.ent_score_exam.insert(0, "57")
-        self.ent_score_exam.grid(row=0, column=5, padx=8, pady=8)
-
-        action_frame = ttk.Frame(frame, style="Card.TFrame")
-        action_frame.pack(padx=20, pady=15, fill="x")
-
-        btn_calc = ttk.Button(action_frame, text="Compute & Save Scores", style="Primary.TButton", command=self._handle_grade_calculation)
-        btn_calc.pack(side="left", padx=5)
-
-        # Visible result feedback label
-        self.lbl_calc_result = ttk.Label(action_frame, text="Status: Ready to compute grades.", font=("Segoe UI", 10, "bold"), foreground="#9CA3AF")
-        self.lbl_calc_result.pack(side="left", padx=20)
-
-        self.update_calc_students()
-
-    def _handle_grade_calculation(self):
-        offering_id = self.cmb_offering_id_calc.get().strip()
-        student_id = self.cmb_calc_student_id.get().strip()
-        period_name = self.cmb_calc_period.get().strip()
-
-        if not offering_id or not student_id:
-            messagebox.showwarning("Missing Data", "Please select both an Offering ID and a Student ID.")
-            return
-
-        try:
-            quiz_score = float(self.ent_score_quiz.get().strip())
-            lab_score = float(self.ent_score_lab.get().strip())
-            exam_score = float(self.ent_score_exam.get().strip())
-        except ValueError:
-            messagebox.showwarning("Invalid Input", "All component scores must be valid numeric values.")
-            return
-
-        # Validation Checks (SC-02 & SC-03)
-        if quiz_score < 0 or lab_score < 0 or exam_score < 0:
-            messagebox.showerror("Validation Error (SC-03)", "Component scores cannot be negative numbers.")
-            return
-
-        if quiz_score > 50:
-            messagebox.showerror("Validation Error (SC-02)", f"Quiz score ({quiz_score}) exceeds maximum allowed limit of 50.")
-            return
-
-        if lab_score > 100:
-            messagebox.showerror("Validation Error (SC-02)", f"Laboratory score ({lab_score}) exceeds maximum allowed limit of 100.")
-            return
-
-        if exam_score > 100:
-            messagebox.showerror("Validation Error (SC-02)", f"Examination score ({exam_score}) exceeds maximum allowed limit of 100.")
-            return
-
-        try:
-            from config.database import get_db_connection
-            conn = get_db_connection()
-            cursor = conn.cursor()
-
-            # 1. Ensure grading period exists
-            period_id = 'PRD001' if period_name.lower() in ['midterm', 'mid'] else 'PRD002'
-            cursor.execute(
-                """
-                INSERT INTO gradingperiod (period_id, name, start_date, end_date, school_year, semester)
-                VALUES (%s, %s, '2025-08-01', '2025-12-15', '2025-2026', '1st')
-                ON CONFLICT (period_id) DO NOTHING;
-                """,
-                (period_id, period_name)
-            )
-
-            # 2. Find active enrollment ID
-            cursor.execute("SELECT enrollment_id FROM enrollment WHERE student_id = %s AND offering_id = %s;", (student_id, offering_id))
-            row = cursor.fetchone()
-            if not row:
-                raise ValueError(f"No active enrollment found for Student '{student_id}' in Offering '{offering_id}'. Please enroll them first.")
-            enrollment_id = row[0]
-            cursor.close()
+            conn = self._db()
             conn.close()
+            self.status.set("Connected")
+            self.side_status.configure(text_color=self.GREEN)
+            self.db_badge.configure(text="●  DATABASE ONLINE", text_color=self.GREEN)
+        except Exception as exc:
+            self.status.set("Not connected — check .env")
+            self.side_status.configure(text_color=self.AMBER)
+            self.db_badge.configure(text="●  DATABASE OFFLINE", text_color=self.AMBER)
 
-            # 3. Save individual raw component scores to gradecomponentscore table (SC-01)
-            # Component IDs assumed: Midterm -> comp 1, 2, 3 | Finals -> comp 4, 5, 6
-            c_quiz = '1' if period_id == 'PRD001' else '4'
-            c_lab = '2' if period_id == 'PRD001' else '5'
-            c_exam = '3' if period_id == 'PRD001' else '6'
+    def _show_error(self, error):
+        sqlstate = getattr(error, "pgcode", None)
+        constraint = getattr(getattr(error, "diag", None), "constraint_name", "") or ""
+        if sqlstate == "23505":
+            message = "A record with that ID or unique code already exists. Please use a different value."
+        elif sqlstate == "23503":
+            messages = {
+                "enrollment_student_id_fkey": "This student has an enrollment. Remove or reassign the enrollment before deleting the student.",
+                "enrollment_class_id_fkey": "This class has student enrollments. Remove the enrollments before deleting the class.",
+                "class_offering_teacher_id_fkey": "This teacher is assigned to a class. Reassign or remove the class before deleting the teacher.",
+                "class_offering_subject_id_fkey": "This subject is used by a class. Reassign or remove the class before deleting the subject.",
+            }
+            message = messages.get(constraint, "This record is still used by other records and cannot be deleted yet.")
+        elif sqlstate == "23514" and "units" in constraint:
+            message = "Units must be a positive whole number."
+        elif sqlstate == "23502":
+            message = "Complete all required fields before saving."
+        elif sqlstate == "22P02":
+            message = "Enter a valid number or value in each field."
+        else:
+            message = str(error)
+        messagebox.showerror("Unable to complete action", message, parent=self)
 
-            self.grade_repo.save_component_score(enrollment_id, period_id, c_quiz, quiz_score)
-            self.grade_repo.save_component_score(enrollment_id, period_id, c_lab, lab_score)
-            self.grade_repo.save_component_score(enrollment_id, period_id, c_exam, exam_score)
-
-            # 4. Trigger grading service calculation
-            result = self.grading_service.calculate_and_save_period_grade(f"GRD_{enrollment_id}", student_id, offering_id)
-
-            computed_grade = result.get("overall_pct", 0.0)
-            equiv = result.get("final_equiv", 1.0)
-            remarks = result.get("remarks", "Passed")
-
-            self.lbl_calc_result.config(
-                text=f"Computed: {computed_grade:.2f}% | Grade Point: {equiv:.2f} | Remarks: {remarks}",
-                foreground="#10B981"
-            )
-            messagebox.showinfo("Success", f"Component scores saved and grade computed successfully!\nFinal Percentage: {computed_grade:.2f}% (Equivalent: {equiv:.2f} - {remarks})")
-        except Exception as e:
-            self.lbl_calc_result.config(text=f"Error: {str(e)}", foreground="#EF4444")
-            messagebox.showerror("Calculation Error", str(e))
-
-    # ------------------------------------------------------------------
-    # TAB 3.2: DIRECT GRADE ENTRY (Grading & Scores -> Direct Grade Entry)
-    # ------------------------------------------------------------------
-    def _setup_direct_grade_tab(self):
-        offering_options = ["OFF001", "OFF002", "OFF003", "OFF004"]
-        grade_frame = ttk.LabelFrame(self.sub_direct_grade, text=" Directly Add / Update Student Grade ", style="Card.TLabelframe")
-        grade_frame.pack(fill="x", padx=15, pady=20)
-
-        grid_g = ttk.Frame(grade_frame, style="Card.TFrame")
-        grid_g.pack(padx=20, pady=20, fill="x")
-
-        ttk.Label(grid_g, text="Grade Record ID:").grid(row=0, column=0, padx=8, pady=8, sticky="w")
-        self.ent_man_grade_id = ttk.Entry(grid_g, width=15)
-        self.ent_man_grade_id.insert(0, "GRD003")
-        self.ent_man_grade_id.grid(row=0, column=1, padx=8, pady=8)
-
-        ttk.Label(grid_g, text="Student ID:").grid(row=0, column=2, padx=8, pady=8, sticky="w")
-        self.cmb_man_student_id = ttk.Combobox(grid_g, width=15)
-        self.cmb_man_student_id.grid(row=0, column=3, padx=8, pady=8)
-
-        ttk.Label(grid_g, text="Offering ID:").grid(row=0, column=4, padx=8, pady=8, sticky="w")
-        self.cmb_man_offering_id = ttk.Combobox(grid_g, width=15, values=offering_options)
-        self.cmb_man_offering_id.set("OFF001")
-        self.cmb_man_offering_id.grid(row=0, column=5, padx=8, pady=8)
-
-        ttk.Label(grid_g, text="Period Name:").grid(row=1, column=0, padx=8, pady=8, sticky="w")
-        self.cmb_man_period = ttk.Combobox(grid_g, width=15, values=["Midterm", "Finals", "Prelim", "Semi-Final"])
-        self.cmb_man_period.set("Finals")
-        self.cmb_man_period.grid(row=1, column=1, padx=8, pady=8)
-
-        ttk.Label(grid_g, text="Final Grade (%):").grid(row=1, column=2, padx=8, pady=8, sticky="w")
-        self.ent_man_score = ttk.Entry(grid_g, width=15)
-        self.ent_man_score.insert(0, "92.5")
-        self.ent_man_score.grid(row=1, column=3, padx=8, pady=8)
-
-        ttk.Label(grid_g, text="Remarks:").grid(row=1, column=4, padx=8, pady=8, sticky="w")
-        self.cmb_man_remarks = ttk.Combobox(grid_g, width=15, values=["Passed", "Failed", "Incomplete", "Dropped"])
-        self.cmb_man_remarks.set("Passed")
-        self.cmb_man_remarks.grid(row=1, column=5, padx=8, pady=8)
-
-        btn_save_grade = ttk.Button(grid_g, text="Save Grade", style="Primary.TButton", command=self._save_direct_grade_action)
-        btn_save_grade.grid(row=1, column=6, padx=15, pady=8)
-
-    def _save_direct_grade_action(self):
-        grade_id = self.ent_man_grade_id.get().strip()
-        std_id = self.cmb_man_student_id.get().strip()
-        off_id = self.cmb_man_offering_id.get().strip()
-        period = self.cmb_man_period.get().strip()
-
+    def _guard(self, action):
         try:
-            score = float(self.ent_man_score.get().strip())
-        except ValueError:
-            messagebox.showwarning("Invalid Score", "Please enter a valid numeric grade percentage.")
-            return
+            action()
+        except Exception as exc:
+            self._show_error(exc)
 
-        remarks = self.cmb_man_remarks.get().strip()
+    def _card(self, parent, title):
+        card = ctk.CTkFrame(parent, fg_color=self.CARD, corner_radius=13,
+                            border_width=1, border_color=self.BORDER)
+        ctk.CTkLabel(card, text=title, text_color=self.TEXT,
+                     font=ctk.CTkFont(size=13, weight="bold"))\
+            .pack(anchor="w", padx=16, pady=(14, 4))
+        return card
 
-        try:
-            from config.database import get_db_connection
-            conn = get_db_connection()
-            cursor = conn.cursor()
+    def _add_crud_page(self, title):
+        table, key, fields = self.TABLES[title]
+        self._set_page(title, title)
+        page = ctk.CTkFrame(self.content, fg_color="transparent")
+        page.grid(row=0, column=0, sticky="nsew")
+        page.grid_columnconfigure(0, weight=1)
+        page.grid_rowconfigure(2, weight=1)
+        subtitle = {
+            "Students": "Maintain student identities and program information.",
+            "Teachers": "Manage teaching staff and department records.",
+            "Subjects": "Define the courses used by class offerings.",
+            "Classes": "Connect a subject, teacher, section, and academic term.",
+            "Enrollments": "Register students in a class offering.",
+            "Grading Periods": "Set the academic periods used for grade calculations.",
+            "Grade Components": "Add quizzes, assignments, exams, and other score categories.",
+        }.get(title, "Manage project records.")
+        self._section_intro(page, "Manage " + title.lower(), subtitle)
 
-            cursor.execute("SELECT enrollment_id FROM enrollment WHERE student_id = %s AND offering_id = %s;", (std_id, off_id))
-            row = cursor.fetchone()
+        form = self._card(page, "RECORD DETAILS  /  ADD OR UPDATE")
+        form.pack(fill="x", pady=(0, 12))
+        grid = ctk.CTkFrame(form, fg_color="transparent")
+        grid.pack(fill="x", padx=13, pady=(6, 13))
+        column_count = 4
+        for col in range(column_count):
+            grid.grid_columnconfigure(col, weight=1, uniform="fields")
+        widgets = {}
+        choice_maps = {}
+        choice_definitions = self._choice_definitions(table)
+        editable_choices = {"program", "department"}
+        auto_keys = {"subject_id", "class_id", "enrollment_id", "period_id", "component_id"}
+        field_defaults = {
+            "student": {"status": "Active"},
+            "teacher": {"status": "Active"},
+            "enrollment": {"status": "Enrolled"},
+        }.get(table, {})
+        for index, field in enumerate(fields):
+            row, col = divmod(index, column_count)
+            cell = ctk.CTkFrame(grid, fg_color="transparent")
+            cell.grid(row=row, column=col, sticky="ew", padx=5, pady=5)
+            label = field.replace("_", " ").title()
+            if field == key and field in auto_keys:
+                label += "  /  AUTO"
+            ctk.CTkLabel(cell, text=label, text_color=self.MUTED,
+                         font=ctk.CTkFont(size=10, weight="bold"))\
+                .pack(anchor="w", padx=2, pady=(0, 5))
+            if field in choice_definitions:
+                entry, choice_maps[field] = self._make_combo(
+                    cell, choice_definitions[field], default=field_defaults.get(field), height=35,
+                    editable=field in editable_choices)
+            else:
+                entry = ctk.CTkEntry(cell, height=35, corner_radius=8,
+                                     fg_color="#0e1729", border_color=self.BORDER,
+                                     text_color=self.TEXT, placeholder_text="Enter " + field.replace("_", " "))
+            entry.pack(fill="x")
+            if field in field_defaults and field not in choice_maps:
+                entry.insert(0, field_defaults[field])
+            if field == key and field in auto_keys:
+                entry.configure(state="disabled", placeholder_text="Generated by database")
+            widgets[field] = entry
 
-            period_id = 'PRD002' if period.lower() in ['finals', 'final'] else 'PRD001'
+        tree_card = self._card(page, "RECORDS  /  SELECT A ROW TO EDIT")
+        tree_card.pack(fill="both", expand=True)
+        search_row = ctk.CTkFrame(tree_card, fg_color="transparent")
+        search_row.pack(fill="x", padx=12, pady=(6, 4))
+        search_entry = ctk.CTkEntry(
+            search_row, width=300, height=34, fg_color="#0e1729",
+            border_color=self.BORDER, placeholder_text=f"Search {title.lower()}...",
+        )
+        search_entry.pack(side="left", padx=(0, 7))
+        controls = ctk.CTkFrame(tree_card, fg_color="transparent")
+        controls.pack(fill="x", padx=12, pady=(6, 10))
+        columns = tuple(fields)
+        tree_wrap = ctk.CTkFrame(tree_card, fg_color=self.PANEL, corner_radius=9)
+        tree_wrap.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        tree = ttk.Treeview(tree_wrap, columns=columns, show="headings", height=11)
+        for field in fields:
+            tree.heading(field, text=field.replace("_", " ").upper())
+            tree.column(field, width=max(105, min(185, 1120 // len(fields))), anchor="w")
+        tree.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=6)
+        ybar = ttk.Scrollbar(tree_wrap, orient="vertical", command=tree.yview)
+        ybar.pack(side="right", fill="y", padx=(0, 5), pady=6)
+        xbar = ttk.Scrollbar(tree_card, orient="horizontal", command=tree.xview)
+        xbar.pack(fill="x", padx=16, pady=(0, 10))
+        tree.configure(yscrollcommand=ybar.set, xscrollcommand=xbar.set)
+        state = {"selected": None}
 
-            if not row:
-                raise ValueError(f"No active enrollment found for Student '{std_id}' in Offering '{off_id}'. Please enroll them first.")
+        def set_field(field, value):
+            widget = widgets[field]
+            if field in choice_maps:
+                display = next((label for label, raw in choice_maps[field].items()
+                                if raw is not None and str(raw) == str(value)), None)
+                if display is None and field in editable_choices and value:
+                    display = str(value)
+                display = display or "Choose an available record"
+                widget.set(display)
+                return
+            disabled = str(widget.cget("state")) == "disabled"
+            if disabled:
+                widget.configure(state="normal")
+            widget.delete(0, "end")
+            widget.insert(0, "" if value is None else str(value))
+            if disabled:
+                widget.configure(state="disabled")
 
-            enrollment_id = row[0]
-            cursor.close()
-            conn.close()
+        def clear():
+            for field in fields:
+                set_field(field, field_defaults.get(field, ""))
+            state["selected"] = None
+            tree.selection_remove(tree.selection())
 
-            self.grade_repo.save_or_update_grade(grade_id, enrollment_id, period_id, score, remarks)
-            messagebox.showinfo("Success", f"Grade record '{grade_id}' updated successfully for student '{std_id}'!")
-        except Exception as e:
-            messagebox.showerror("Grade Error", str(e))
+        def refresh():
+            tree.delete(*tree.get_children())
+            term = search_entry.get().strip()
+            sql = f"SELECT {', '.join(fields)} FROM {table}"
+            params = ()
+            if term:
+                predicates = [f"CAST({field} AS TEXT) ILIKE %s" for field in fields]
+                sql += " WHERE " + " OR ".join(predicates)
+                params = tuple(f"%{term}%" for _field in fields)
+            rows = self._query(sql + f" ORDER BY {key}", params)
+            for row in rows:
+                tree.insert("", "end", values=["" if value is None else value for value in row])
 
-    # ------------------------------------------------------------------
-    # TAB 4.1: CLASS LIST REPORT (Reports -> Class List)
-    # ------------------------------------------------------------------
-    def _setup_class_list_tab(self):
-        filter_frame = ttk.Frame(self.sub_rep_class_list, style="Card.TFrame")
-        filter_frame.pack(fill="x", padx=15, pady=15)
+        def search_records(_event=None):
+            self._guard(refresh)
 
-        ttk.Label(filter_frame, text="Select Offering ID:").pack(side="left", padx=8)
-        self.cmb_offering_class = ttk.Combobox(filter_frame, width=15)
-        self.cmb_offering_class.pack(side="left", padx=8)
+        def clear_search():
+            search_entry.delete(0, "end")
+            self._guard(refresh)
 
-        btn_fetch = ttk.Button(filter_frame, text="Generate Class List", style="Primary.TButton", command=self._generate_class_list)
-        btn_fetch.pack(side="left", padx=12)
+        def selected(_event=None):
+            item = tree.focus()
+            if not item:
+                return
+            row = tree.item(item, "values")
+            for field, value in zip(fields, row):
+                set_field(field, value)
+            state["selected"] = row[fields.index(key)] if key in fields else None
 
-        table_frame = ttk.Frame(self.sub_rep_class_list, style="Card.TFrame")
-        table_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
+        def collect():
+            data = {}
+            for field in fields:
+                value = widgets[field].get().strip()
+                if field == key and field in auto_keys:
+                    continue
+                if field in choice_maps:
+                    if field in editable_choices:
+                        data[field] = choice_maps[field].get(value, value) or None
+                    else:
+                        data[field] = choice_maps[field].get(value)
+                    continue
+                data[field] = value or None
+            return data
 
-        columns = ("student_id", "name", "program", "email", "status")
-        self.tree_class_list = ttk.Treeview(table_frame, columns=columns, show="headings")
+        def add():
+            data = collect()
+            data = {field: value for field, value in data.items()
+                    if field != key or field in {"student_id", "teacher_id"}}
+            required = {
+                "student": {"student_id", "first_name", "last_name", "program", "year_level"},
+                "teacher": {"teacher_id", "first_name", "last_name", "department"},
+                "subject": {"subject_code", "subject_name", "units"},
+                "class_offering": {"class_code", "subject_id", "teacher_id", "section", "school_year", "semester"},
+                "enrollment": {"student_id", "class_id"},
+                "grading_period": {"name", "period_order", "school_year", "semester"},
+                "grade_component": {"period_id", "name", "type", "max_score"},
+            }.get(table, set())
+            missing = sorted(field.replace("_", " ").title()
+                             for field in required if not data.get(field))
+            if missing:
+                noun = "field" if len(missing) == 1 else "fields"
+                raise ValueError(f"Complete these required {noun}: " + ", ".join(missing) + ".")
+            names = list(data)
+            marks = ", ".join(["%s"] * len(names))
+            self._query(f"INSERT INTO {table} ({', '.join(names)}) VALUES ({marks})",
+                        tuple(data[name] for name in names), fetch=False)
+            refresh()
+            clear()
+            messagebox.showinfo("Record added", f"The {title.lower()} record was added successfully.", parent=self)
 
-        headers = {
-            "student_id": "Student ID",
-            "name": "Student Name",
-            "program": "Program",
-            "email": "Email Address",
-            "status": "Status"
-        }
+        def update():
+            if state["selected"] is None:
+                raise ValueError("Select a row in the table before updating it.")
+            data = collect()
+            data.pop(key, None)
+            if not data:
+                raise ValueError("There are no fields to update.")
+            assignments = ", ".join(f"{name}=%s" for name in data)
+            self._query(f"UPDATE {table} SET {assignments} WHERE {key}=%s",
+                        tuple(data.values()) + (state["selected"],), fetch=False)
+            refresh()
+            clear()
+            messagebox.showinfo("Changes saved", f"The {title.lower()} record was updated successfully.", parent=self)
 
-        for col_id, col_name in headers.items():
-            self.tree_class_list.heading(col_id, text=col_name)
-            self.tree_class_list.column(col_id, anchor="center" if col_id in ["student_id", "program", "status"] else "w")
+        def delete():
+            if state["selected"] is None:
+                raise ValueError("Select a row in the table before deleting it.")
+            if not messagebox.askyesno("Confirm deletion", "Delete the selected record?", parent=self):
+                return
+            self._query(f"DELETE FROM {table} WHERE {key}=%s", (state["selected"],), fetch=False)
+            refresh()
+            clear()
+            messagebox.showinfo("Record deleted", f"The {title.lower()} record was deleted.", parent=self)
 
-        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree_class_list.yview)
-        self.tree_class_list.configure(yscrollcommand=scrollbar.set)
+        self._button(controls, "＋  Add record", add, self.BLUE).pack(side="left", padx=(0, 7))
+        self._button(controls, "↻  Refresh", refresh, self.CARD_HOVER).pack(side="left", padx=4)
+        self._button(controls, "Update selected", update, self.CARD_HOVER).pack(side="left", padx=4)
+        self._button(controls, "Delete selected", delete, "#432638", self.RED).pack(side="left", padx=4)
+        self._button(controls, "Clear form", clear, self.CARD_HOVER).pack(side="right")
+        self._button(search_row, "Search", search_records, self.BLUE).pack(side="left", padx=(0, 6))
+        self._button(search_row, "Clear search", clear_search, self.CARD_HOVER).pack(side="left")
+        search_entry.bind("<Return>", search_records)
+        tree.bind("<<TreeviewSelect>>", selected)
+        self._after_page(100, lambda: self._guard(refresh))
 
-        self.tree_class_list.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+    def _button(self, parent, text, command, color=None, text_color=None):
+        return ctk.CTkButton(parent, text=text, command=lambda: self._guard(command),
+                             height=34, corner_radius=8,
+                             fg_color=color or self.BLUE,
+                             hover_color=self.CARD_HOVER if color == self.BLUE else self.BORDER,
+                             text_color=text_color or self.TEXT,
+                             font=ctk.CTkFont(size=10, weight="bold"))
 
-    def _generate_class_list(self):
-        offering_id = self.cmb_offering_class.get().strip()
-        if not offering_id:
-            messagebox.showwarning("Missing Offering ID", "Please select an Offering ID.")
-            return
+    def show_crud_page(self, title):
+        self._add_crud_page(title)
 
-        for row in self.tree_class_list.get_children():
-            self.tree_class_list.delete(row)
+    def show_weights_page(self):
+        self._set_page("Grade Weights", "weights")
+        page = ctk.CTkFrame(self.content, fg_color="transparent")
+        page.grid(row=0, column=0, sticky="nsew")
+        page.grid_columnconfigure(0, weight=1)
+        self._section_intro(page, "Configure component weights",
+                            "Weights are saved per class and grading period. Each period must total exactly 100%.")
+        card = self._card(page, "CLASS CONFIGURATION")
+        card.pack(fill="x", pady=(0, 12))
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(fill="x", padx=14, pady=(6, 14))
+        row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(row, text="Class", text_color=self.MUTED).grid(
+            row=0, column=0, sticky="w", padx=(0, 10))
+        class_id, class_choices = self._make_combo(
+            row, self._reference_options("class"), width=520, height=36)
+        class_id.grid(row=0, column=1, sticky="ew", padx=(0, 10))
+        list_card = self._card(page, "WEIGHTS BY GRADING PERIOD")
+        list_card.pack(fill="both", expand=True)
+        ctk.CTkLabel(list_card, text="Set each component’s share. Every period must add up to 100%.",
+                     text_color=self.MUTED, font=ctk.CTkFont(size=10))\
+            .pack(anchor="w", padx=16, pady=(0, 8))
+        area = ctk.CTkScrollableFrame(
+            list_card, fg_color="transparent", corner_radius=0,
+            scrollbar_button_color=self.BORDER,
+            scrollbar_button_hover_color=self.BLUE)
+        area.pack(fill="both", expand=True, padx=8, pady=(0, 12))
+        entries = {}
+        period_entries = {}
+        period_totals = {}
 
-        try:
-            students = self.report_service.get_class_list(offering_id)
-            for s in students:
-                name = f"{s.get('first_name', '')} {s.get('last_name', '')}".strip()
-                self.tree_class_list.insert("", "end", values=(
-                    s.get("student_id", ""),
-                    name,
-                    s.get("program", ""),
-                    s.get("email", ""),
-                    s.get("status", "")
+        def load():
+            for child in area.winfo_children():
+                child.destroy()
+            entries.clear()
+            period_entries.clear()
+            period_totals.clear()
+            class_value = class_choices.get(class_id.get())
+            if not class_value:
+                raise ValueError("Choose a class first.")
+            rows = self._query("""SELECT gc.component_id,gc.name,gp.name,gp.period_id,COALESCE(w.percentage,0)
+                FROM grade_component gc JOIN grading_period gp USING(period_id)
+                LEFT JOIN grade_percentage w ON w.component_id=gc.component_id AND w.class_id=%s
+                WHERE gp.school_year=(SELECT school_year FROM class_offering WHERE class_id=%s)
+                AND gp.semester=(SELECT semester FROM class_offering WHERE class_id=%s)
+                ORDER BY gp.period_order,gc.component_id""", (class_value, class_value, class_value))
+            if not rows:
+                raise ValueError("No grade components were found for this class term.")
+            grouped = {}
+            period_names = {}
+            for cid, name, period, period_id, pct in rows:
+                grouped.setdefault(period_id, []).append((cid, name, pct))
+                period_names[period_id] = period
+
+            for column in range(2):
+                area.grid_columnconfigure(column, weight=1, uniform="period_cards")
+
+            def update_total(period_id):
+                try:
+                    total = sum(float(entry.get().strip() or 0)
+                                for entry in period_entries.get(period_id, []))
+                    valid = abs(total - 100.0) < 0.005
+                    period_totals[period_id].configure(
+                        text=f"Total  {total:.2f}%  ·  {'Ready to save' if valid else 'Must equal 100%'}",
+                        text_color=self.GREEN if valid else self.MUTED)
+                except ValueError:
+                    period_totals[period_id].configure(
+                        text="Total  Check the entered numbers", text_color=self.RED)
+
+            for index, (period_id, components) in enumerate(grouped.items()):
+                period_card = self._card(area, period_names[period_id].upper())
+                period_card.grid(row=index // 2, column=index % 2, sticky="nsew",
+                                 padx=5, pady=5)
+                body = ctk.CTkFrame(period_card, fg_color="transparent")
+                body.pack(fill="both", expand=True, padx=12, pady=(2, 10))
+                body.grid_columnconfigure(0, weight=1)
+                body.grid_columnconfigure(1, weight=0)
+                ctk.CTkLabel(body, text="COMPONENT", text_color=self.CYAN,
+                             font=ctk.CTkFont(family="Consolas", size=9, weight="bold"))\
+                    .grid(row=0, column=0, sticky="w", padx=(4, 8), pady=(2, 6))
+                ctk.CTkLabel(body, text="WEIGHT", text_color=self.CYAN,
+                             font=ctk.CTkFont(family="Consolas", size=9, weight="bold"))\
+                    .grid(row=0, column=1, sticky="e", padx=4, pady=(2, 6))
+                period_entries[period_id] = []
+                for row_index, (cid, name, pct) in enumerate(components, 1):
+                    ctk.CTkLabel(body, text=name, text_color=self.TEXT, anchor="w")\
+                        .grid(row=row_index, column=0, sticky="ew", padx=4, pady=4)
+                    entry = ctk.CTkEntry(body, width=112, height=32,
+                                         fg_color="#0e1729", border_color=self.BORDER)
+                    entry.insert(0, str(pct))
+                    entry.grid(row=row_index, column=1, sticky="e", padx=4, pady=3)
+                    entries[cid] = entry
+                    period_entries[period_id].append(entry)
+                    entry.bind("<KeyRelease>", lambda _event, pid=period_id: update_total(pid))
+                total_label = ctk.CTkLabel(body, text="", text_color=self.MUTED,
+                                           font=ctk.CTkFont(size=10, weight="bold"))
+                total_label.grid(row=len(components) + 1, column=0, columnspan=2,
+                                 sticky="w", padx=4, pady=(8, 2))
+                period_totals[period_id] = total_label
+                update_total(period_id)
+
+        def save():
+            if not entries:
+                load()
+            self.grading_service.update_grading_weights(
+                str(class_choices[class_id.get()]), {cid: entry.get().strip() for cid, entry in entries.items()})
+            messagebox.showinfo("Weights saved", "The grading weights have been saved.", parent=self)
+
+        self._button(row, "Load components", load, self.BLUE).grid(
+            row=0, column=2, padx=(0, 8))
+        self._button(row, "Save weights", save, self.GREEN, "#071a16").grid(
+            row=0, column=3)
+
+    def show_scores_page(self):
+        self._set_page("Score Entry", "scores")
+        page = ctk.CTkFrame(self.content, fg_color="transparent")
+        page.grid(row=0, column=0, sticky="nsew")
+        page.grid_columnconfigure(0, weight=1)
+        self._section_intro(page, "Record student scores",
+                            "Enter a score for a student’s enrollment and grade component. Saving the same pair updates it.")
+        card = self._card(page, "SCORE RECORD")
+        card.pack(fill="x")
+        form = ctk.CTkFrame(card, fg_color="transparent")
+        form.pack(fill="x", padx=15, pady=(6, 16))
+        specs = [("enrollment_id", "Enrollment ID"), ("component_id", "Component ID"),
+                 ("score", "Score earned"), ("remarks", "Remarks (optional)")]
+        entries = {}
+        score_choice_maps = {}
+        for col, (field, label) in enumerate(specs):
+            form.grid_columnconfigure(col, weight=1, uniform="score")
+            ctk.CTkLabel(form, text=label, text_color=self.MUTED,
+                         font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=col, sticky="w", padx=6, pady=(3, 5))
+            if field == "enrollment_id":
+                entry, score_choice_maps[field] = self._make_combo(
+                    form, self._reference_options("enrollment"), height=38)
+            elif field == "component_id":
+                entry, score_choice_maps[field] = self._make_combo(
+                    form, self._reference_options("component"), height=38)
+            else:
+                entry = ctk.CTkEntry(form, height=38, fg_color="#0e1729", border_color=self.BORDER,
+                                     placeholder_text="Enter " + label.lower())
+            entry.grid(row=1, column=col, sticky="ew", padx=6)
+            entries[field] = entry
+        ctk.CTkLabel(card, text="Scores must be within the component’s maximum. The system checks enrollment, class, period, and weight.",
+                     text_color=self.MUTED, font=ctk.CTkFont(size=10), wraplength=800)\
+            .pack(anchor="w", padx=22, pady=(0, 12))
+
+        def save():
+            enrollment = score_choice_maps["enrollment_id"].get(entries["enrollment_id"].get())
+            component = score_choice_maps["component_id"].get(entries["component_id"].get())
+            score = entries["score"].get().strip()
+            remarks = entries["remarks"].get().strip()
+            if not enrollment or not component or not score:
+                raise ValueError("Choose an enrollment and grade component, then enter a score.")
+            rows = self._query("SELECT period_id FROM grade_component WHERE component_id=%s", (component,))
+            if not rows:
+                raise ValueError("Component ID was not found.")
+            self.grade_repo.save_component_score(enrollment, rows[0][0], component, score)
+            self._query("UPDATE grade_component_score SET remarks=%s WHERE enrollment_id=%s AND component_id=%s",
+                        (remarks or None, enrollment, component), fetch=False)
+            reload_saved_scores()
+            messagebox.showinfo("Score saved", "The student score has been saved.", parent=self)
+
+        def delete():
+            enrollment = score_choice_maps["enrollment_id"].get(entries["enrollment_id"].get())
+            component = score_choice_maps["component_id"].get(entries["component_id"].get())
+            if not enrollment or not component:
+                raise ValueError("Choose the enrollment and grade component for the score to remove.")
+            found = self._query("SELECT period_id FROM grade_component WHERE component_id=%s", (component,))
+            if not found:
+                raise ValueError("Component ID was not found.")
+            if not messagebox.askyesno("Confirm deletion", "Delete this component score?", parent=self):
+                return
+            if not self.grade_repo.delete_component_score(enrollment, found[0][0], component):
+                raise ValueError("No score exists for that enrollment and component.")
+            reload_saved_scores()
+            messagebox.showinfo("Score deleted", "The component score has been deleted.", parent=self)
+
+        buttons = ctk.CTkFrame(card, fg_color="transparent")
+        buttons.pack(anchor="w", padx=16, pady=(0, 16))
+        self._button(buttons, "Save score", save, self.BLUE).pack(side="left", padx=5)
+        self._button(buttons, "Delete score", delete, "#432638", self.RED).pack(side="left", padx=5)
+
+        saved_card = self._card(page, "SAVED SCORES  /  RELOAD BY CLASS")
+        saved_card.pack(fill="both", expand=True, pady=(12, 0))
+        saved_controls = ctk.CTkFrame(saved_card, fg_color="transparent")
+        saved_controls.pack(fill="x", padx=12, pady=(5, 8))
+        class_options = self._reference_options("class")
+        class_filter, class_filter_choices = self._make_combo(
+            saved_controls, class_options, width=420, height=36)
+        class_filter.pack(side="left", padx=(4, 8))
+        if class_options:
+            class_filter.set(class_options[0][1])
+        score_tree_wrap = ctk.CTkFrame(saved_card, fg_color=self.PANEL, corner_radius=9)
+        score_tree_wrap.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        score_columns = ("enrollment_id", "component_id", "student", "period", "component",
+                         "score", "maximum", "remarks", "recorded")
+        score_tree = ttk.Treeview(score_tree_wrap, columns=score_columns,
+                                  displaycolumns=score_columns[2:], show="headings", height=9)
+        for column, title, width in (
+            ("student", "Student", 210), ("period", "Period", 110),
+            ("component", "Component", 230), ("score", "Score", 80),
+            ("maximum", "Max", 70), ("remarks", "Remarks", 230),
+            ("recorded", "Date Recorded", 120),
+        ):
+            score_tree.heading(column, text=title)
+            score_tree.column(column, width=width, minwidth=70,
+                              anchor="center" if column in {"score", "maximum", "recorded"} else "w",
+                              stretch=column in {"student", "component", "remarks"})
+        score_tree.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=6)
+        score_scroll = ttk.Scrollbar(score_tree_wrap, orient="vertical", command=score_tree.yview)
+        score_scroll.pack(side="right", fill="y", padx=(0, 5), pady=6)
+        score_tree.configure(yscrollcommand=score_scroll.set)
+
+        def reload_saved_scores():
+            score_tree.delete(*score_tree.get_children())
+            selected_class = class_filter_choices.get(class_filter.get())
+            if not selected_class:
+                return
+            rows = self._query("""SELECT e.enrollment_id, gc.component_id,
+                st.last_name || ', ' || st.first_name, gp.name, gc.name,
+                gcs.score, gc.max_score, COALESCE(gcs.remarks, ''), gcs.date_recorded
+                FROM grade_component_score gcs
+                JOIN enrollment e USING(enrollment_id)
+                JOIN student st USING(student_id)
+                JOIN grade_component gc USING(component_id)
+                JOIN grading_period gp USING(period_id)
+                WHERE e.class_id=%s AND e.status='Enrolled'
+                ORDER BY st.last_name, st.first_name, gp.period_order, gc.component_id""",
+                (selected_class,))
+            for row in rows:
+                score_tree.insert("", "end", values=row)
+
+        def select_saved_score(_event=None):
+            selected = score_tree.focus()
+            if not selected:
+                return
+            values = score_tree.item(selected, "values")
+            enrollment_id, component_id = values[:2]
+            for field, value in (("enrollment_id", enrollment_id), ("component_id", component_id)):
+                display = next((label for label, stored in score_choice_maps[field].items()
+                                if stored is not None and str(stored) == str(value)), None)
+                if display:
+                    entries[field].set(display)
+            entries["score"].delete(0, "end")
+            entries["score"].insert(0, str(values[5]))
+            entries["remarks"].delete(0, "end")
+            entries["remarks"].insert(0, str(values[7]))
+
+        self._button(saved_controls, "↻  Reload scores", reload_saved_scores,
+                     self.CARD_HOVER).pack(side="left", padx=4)
+        class_filter.configure(command=lambda _value: self._guard(reload_saved_scores))
+        score_tree.bind("<<TreeviewSelect>>", select_saved_score)
+        self._after_page(120, lambda: self._guard(reload_saved_scores))
+
+    def show_reports_page(self):
+        self._set_page("Compute & Reports", "reports")
+        page = ctk.CTkFrame(self.content, fg_color="transparent")
+        page.grid(row=0, column=0, sticky="nsew")
+        page.grid_columnconfigure(0, weight=1)
+        self._section_intro(page, "Compute grades and build reports",
+                            "Recalculate a student’s weighted grade or view class and student reports.")
+
+        tools = ctk.CTkFrame(page, fg_color="transparent")
+        tools.pack(fill="x", pady=(0, 12))
+        compute = self._card(tools, "GRADE COMPUTATION")
+        compute.pack(fill="x", pady=(0, 10))
+        compute_row = ctk.CTkFrame(compute, fg_color="transparent")
+        compute_row.pack(fill="x", padx=13, pady=(6, 14))
+        enrollment, enrollment_choices = self._small_combo(
+            compute_row, "Enrollment", self._reference_options("enrollment"), 240)
+        class_id, class_choices = self._small_combo(
+            compute_row, "Class", self._reference_options("class"), 220)
+        result_label = ctk.CTkLabel(compute, text="Grade results will appear here.",
+                                    text_color=self.MUTED, font=ctk.CTkFont(size=11))
+        result_label.pack(anchor="w", padx=18, pady=(0, 13))
+
+        def calculate():
+            enrollment_value = enrollment_choices.get(enrollment.get())
+            class_value = class_choices.get(class_id.get())
+            if not enrollment_value or not class_value:
+                raise ValueError("Choose an enrollment and a class before computing.")
+            result = self.grading_service.calculate_and_save_period_grade(
+                enrollment_id=enrollment_value, class_id=class_value)
+            result_label.configure(text="   •   ".join(f"{k.replace('_', ' ').title()}: {v}" for k, v in result.items()),
+                                   text_color=self.GREEN)
+
+        self._button(compute_row, "Compute & save", calculate, self.BLUE).pack(side="left", padx=5, pady=20)
+
+        report = self._card(tools, "REPORT VIEWER")
+        report.pack(fill="x")
+        report_row = ctk.CTkFrame(report, fg_color="transparent")
+        report_row.pack(fill="x", padx=13, pady=(6, 8))
+        report_row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(report_row, text="Report type", text_color=self.MUTED,
+                     font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=0, sticky="w", padx=5, pady=(0, 4))
+        ctk.CTkLabel(report_row, text="Choose a class or student", text_color=self.MUTED,
+                     font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=1, sticky="w", padx=5, pady=(0, 4))
+        kind = ctk.CTkComboBox(report_row, values=["Class list", "Grade sheet", "Student grade report"],
+                               width=220, height=36, fg_color="#0e1729", border_color=self.BORDER,
+                               button_color=self.BLUE, dropdown_fg_color=self.PANEL)
+        kind.set("Class list")
+        kind.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 4))
+        report_id = ctk.CTkComboBox(
+            report_row, values=["Choose a record"], state="readonly", height=36,
+            fg_color="#0e1729", border_color=self.BORDER,
+            button_color=self.BLUE, dropdown_fg_color=self.PANEL,
+        )
+        report_id.set("Choose a record")
+        report_choices = {"Choose a record": None}
+        report_id.grid(row=1, column=1, sticky="ew", padx=5, pady=(0, 4))
+
+        def refresh_report_choices(_value=None):
+            nonlocal report_choices
+            reference = "student" if kind.get() == "Student grade report" else "class"
+            options = self._reference_options(reference)
+            report_choices = {label: value for value, label in options}
+            labels = ["Choose a record"] + list(report_choices)
+            report_choices["Choose a record"] = None
+            report_id.configure(values=labels)
+            report_id.set("Choose a record")
+
+        kind.configure(command=refresh_report_choices)
+        refresh_report_choices()
+
+        output_card = self._card(page, "OUTPUT  /  REPORT DETAILS")
+        output_card.pack(fill="both", expand=True)
+        report_header = ctk.CTkLabel(output_card, text="Select a report type and record, then choose Show report.",
+                                     text_color=self.MUTED, justify="left", anchor="w",
+                                     font=ctk.CTkFont(size=11), wraplength=1050)
+        report_header.pack(fill="x", padx=16, pady=(4, 8))
+        table_wrap = ctk.CTkFrame(output_card, fg_color="#0e1729", corner_radius=9,
+                                  border_width=1, border_color=self.BORDER)
+        table_wrap.pack(fill="both", expand=True, padx=14, pady=(0, 8))
+        report_table = ttk.Treeview(table_wrap, columns=(), show="headings", height=10)
+        report_table.pack(side="top", fill="both", expand=True, padx=5, pady=(5, 0))
+        ybar = ttk.Scrollbar(table_wrap, orient="vertical", command=report_table.yview)
+        ybar.place(relx=1.0, rely=0, relheight=1.0, anchor="ne")
+        xbar = ttk.Scrollbar(output_card, orient="horizontal", command=report_table.xview)
+        xbar.pack(fill="x", padx=17, pady=(0, 8))
+        report_table.configure(yscrollcommand=ybar.set, xscrollcommand=xbar.set)
+        report_summary = ctk.CTkLabel(output_card, text="", text_color=self.CYAN,
+                                      font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+                                      anchor="w", justify="left")
+        report_summary.pack(fill="x", padx=16, pady=(0, 12))
+
+        def display_report():
+            record_id = report_choices.get(report_id.get())
+            self._render_report(kind.get(), record_id, report_header, report_table, report_summary)
+
+        self._button(report_row, "Show report", display_report, self.CYAN, "#081a1d")\
+            .grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=(5, 4))
+        self.content.grid_rowconfigure(0, weight=1)
+
+    def _small_input(self, parent, label, width):
+        box = ctk.CTkFrame(parent, fg_color="transparent")
+        box.pack(side="left", padx=5, pady=3)
+        ctk.CTkLabel(box, text=label, text_color=self.MUTED,
+                     font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", pady=(0, 4))
+        entry = ctk.CTkEntry(box, width=width, height=36, fg_color="#0e1729", border_color=self.BORDER)
+        entry.pack()
+        return entry
+
+    def _small_combo(self, parent, label, options, width):
+        box = ctk.CTkFrame(parent, fg_color="transparent")
+        box.pack(side="left", padx=5, pady=3)
+        ctk.CTkLabel(box, text=label, text_color=self.MUTED,
+                     font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", pady=(0, 4))
+        combo, choices = self._make_combo(box, options, width=width, height=36)
+        combo.pack()
+        return combo, choices
+
+    def _render_report(self, kind, ident, heading, table, summary):
+        if not ident or ident == "Choose a record":
+            raise ValueError("Choose a class or student for this report.")
+        if kind == "Class list":
+            data = self.report_service.get_class_list_report(ident)
+        elif kind == "Grade sheet":
+            data = self.report_service.get_grade_sheet_report(ident)
+        else:
+            data = self.report_service.get_student_grade_report(ident)
+        for item in table.get_children():
+            table.delete(item)
+        summary.configure(text="")
+
+        if kind in {"Class list", "Grade sheet"}:
+            header = data["header"]
+            semester = header["semester"]
+            semester = semester if "semester" in semester.lower() else semester + " Semester"
+            heading.configure(text=(
+                f"{header['subject_code']} — {header['subject_name']}  |  Section {header['section']}\n"
+                f"Teacher: {header['teacher_name']} — {header['department']}\n"
+                f"School Year: {header['school_year']}  |  {semester}  |  "
+                f"Schedule: {header['schedule'] or '—'}  |  Room: {header['room'] or '—'}"
+            ), text_color=self.TEXT)
+            if kind == "Class list":
+                columns = ("number", "student", "course")
+                headings = ("No.", "Student Name", "Course")
+                rows = [(index, f"{row['last_name']}, {row['first_name']}", row["program"])
+                        for index, row in enumerate(data["records"], 1)]
+            else:
+                columns = ("number", "student", "course", "midterm", "finals")
+                headings = ("No.", "Student", "Course", "MG", "FG")
+                rows = [(index, f"{row['last_name']}, {row['first_name']}", row["program"],
+                         self._report_value(row["midterm_equiv"]),
+                         self._report_value(row["final_equiv"]))
+                        for index, row in enumerate(data["records"], 1)]
+            table.configure(columns=columns)
+            for column, title in zip(columns, headings):
+                table.heading(column, text=title)
+            for column in columns:
+                table.column(column, width=110 if column in {"number", "course", "midterm", "finals"} else 260,
+                             minwidth=70, anchor="center" if column in {"number", "course", "midterm", "finals"} else "w",
+                             stretch=column in {"student"})
+            for row in rows:
+                table.insert("", "end", values=row)
+        else:
+            student = data["student"]
+            year_level = int(student["year_level"])
+            ordinal = f"{year_level}{'st' if year_level == 1 else 'nd' if year_level == 2 else 'rd' if year_level == 3 else 'th'} year"
+            heading.configure(text=(
+                f"Student Name: {student['last_name']}, {student['first_name']}  |  "
+                f"Course: {student['program']}  |  Year: {ordinal}"
+            ), text_color=self.TEXT)
+            columns = ("number", "code", "description", "teacher", "units", "grade")
+            headings = ("No.", "Subject Code", "Description", "Teacher", "Units", "F Grade")
+            table.configure(columns=columns)
+            for column, title in zip(columns, headings):
+                table.heading(column, text=title)
+            for column, width in zip(columns, (55, 125, 330, 190, 70, 90)):
+                table.column(column, width=width, minwidth=55,
+                             anchor="center" if column in {"number", "units", "grade"} else "w",
+                             stretch=column in {"description", "teacher"})
+            for index, row in enumerate(data["records"], 1):
+                table.insert("", "end", values=(
+                    index, row["subject_code"], row["description"], row["teacher_name"],
+                    row["units"], self._report_value(row["final_grade"]),
                 ))
-        except Exception as e:
-            messagebox.showerror("Report Error", str(e))
+            gwa = self._report_value(data["gwa"])
+            summary.configure(text=f"Total Units: {data['total_units']}     "
+                                     f"No. of Subjects: {data['no_of_subjects']}     "
+                                     f"Grade Weighted Average: {gwa}")
 
-    # ------------------------------------------------------------------
-    # TAB 4.2: CLASS GRADE SHEET (Reports -> Class Grade Sheet)
-    # ------------------------------------------------------------------
-    def _setup_grade_sheet_tab(self):
-        filter_frame = ttk.Frame(self.sub_rep_grade_sheet, style="Card.TFrame")
-        filter_frame.pack(fill="x", padx=15, pady=15)
+        if not table.get_children():
+            summary.configure(text="No records were found for this report." if not summary.cget("text")
+                              else summary.cget("text"))
 
-        ttk.Label(filter_frame, text="Select Offering ID:").pack(side="left", padx=8)
-        self.cmb_offering_sheet = ttk.Combobox(filter_frame, width=15)
-        self.cmb_offering_sheet.pack(side="left", padx=8)
+    @staticmethod
+    def _report_value(value):
+        return "Incomplete" if value is None else f"{float(value):.2f}"
 
-        btn_fetch = ttk.Button(filter_frame, text="Generate Grade Sheet", style="Primary.TButton", command=self._generate_grade_sheet)
-        btn_fetch.pack(side="left", padx=12)
-
-        table_frame = ttk.Frame(self.sub_rep_grade_sheet, style="Card.TFrame")
-        table_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
-
-        columns = ("student_id", "name", "period", "final_grade", "remarks")
-        self.tree_grade_sheet = ttk.Treeview(table_frame, columns=columns, show="headings")
-
-        headers = {
-            "student_id": "Student ID",
-            "name": "Student Name",
-            "period": "Period",
-            "final_grade": "Final Grade (%)",
-            "remarks": "Remarks"
-        }
-
-        for col_id, col_name in headers.items():
-            self.tree_grade_sheet.heading(col_id, text=col_name)
-            self.tree_grade_sheet.column(col_id, anchor="center" if col_id in ["student_id", "period", "final_grade", "remarks"] else "w")
-
-        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree_grade_sheet.yview)
-        self.tree_grade_sheet.configure(yscrollcommand=scrollbar.set)
-
-        self.tree_grade_sheet.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-    def _generate_grade_sheet(self):
-        offering_id = self.cmb_offering_sheet.get().strip()
-        if not offering_id:
-            messagebox.showwarning("Missing Offering ID", "Please select an Offering ID.")
-            return
-
-        for row in self.tree_grade_sheet.get_children():
-            self.tree_grade_sheet.delete(row)
-
-        try:
-            grades = self.report_service.get_class_grade_sheet(offering_id)
-            for g in grades:
-                name = f"{g.get('first_name', '')} {g.get('last_name', '')}".strip()
-                score = g.get("final_grade")
-                score_str = f"{float(score):.2f}%" if score is not None else "N/A"
-
-                self.tree_grade_sheet.insert("", "end", values=(
-                    g.get("student_id", ""),
-                    name,
-                    g.get("period_name", "N/A"),
-                    score_str,
-                    g.get("remarks", "N/A")
-                ))
-        except Exception as e:
-            messagebox.showerror("Report Error", str(e))
-
-    # ------------------------------------------------------------------
-    # TAB 4.3: STUDENT GRADE REPORT (Reports -> Student Report)
-    # ------------------------------------------------------------------
-    def _setup_student_report_tab(self):
-        filter_frame = ttk.Frame(self.sub_rep_student_report, style="Card.TFrame")
-        filter_frame.pack(fill="x", padx=15, pady=15)
-
-        ttk.Label(filter_frame, text="Select Student ID:").pack(side="left", padx=8)
-        self.cmb_report_student_id = ttk.Combobox(filter_frame, width=15)
-        self.cmb_report_student_id.pack(side="left", padx=8)
-
-        btn_fetch = ttk.Button(filter_frame, text="Generate Student Report", style="Primary.TButton", command=self._generate_student_report)
-        btn_fetch.pack(side="left", padx=12)
-
-        table_frame = ttk.Frame(self.sub_rep_student_report, style="Card.TFrame")
-        table_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
-
-        columns = ("offering_id", "subject_code", "period", "final_grade", "remarks")
-        self.tree_student_report = ttk.Treeview(table_frame, columns=columns, show="headings")
-
-        headers = {
-            "offering_id": "Offering ID",
-            "subject_code": "Subject Code",
-            "period": "Period",
-            "final_grade": "Final Grade (%)",
-            "remarks": "Remarks"
-        }
-
-        for col_id, col_name in headers.items():
-            self.tree_student_report.heading(col_id, text=col_name)
-            self.tree_student_report.column(col_id, anchor="center" if col_id in ["offering_id", "subject_code", "period", "final_grade", "remarks"] else "w")
-
-        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree_student_report.yview)
-        self.tree_student_report.configure(yscrollcommand=scrollbar.set)
-
-        self.tree_student_report.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-    def _generate_student_report(self):
-        student_id = self.cmb_report_student_id.get().strip()
-        if not student_id:
-            messagebox.showwarning("Missing Student ID", "Please select a Student ID.")
-            return
-
-        for row in self.tree_student_report.get_children():
-            self.tree_student_report.delete(row)
-
-        try:
-            records = self.report_service.get_student_grade_report(student_id)
-            for r in records:
-                score = r.get("final_grade")
-                score_str = f"{float(score):.2f}%" if score is not None else "N/A"
-
-                self.tree_student_report.insert("", "end", values=(
-                    r.get("offering_id", ""),
-                    r.get("subject_code", "N/A"),
-                    r.get("period_name", "N/A"),
-                    score_str,
-                    r.get("remarks", "N/A")
-                ))
-        except Exception as e:
-            messagebox.showerror("Report Error", str(e))
