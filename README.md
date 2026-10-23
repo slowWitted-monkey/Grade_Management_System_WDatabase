@@ -31,6 +31,16 @@ This Python and Tkinter project uses PostgreSQL for students, teachers, subjects
 
 The instructor's live demonstration checklist requires a blank database before the test data is entered. `seed_db.py` now creates missing tables only and does not add sample records.
 
+### Optional load-test data
+
+To explore the GUI, reports, and grade calculations with synthetic records, first point `.env` to a development database such as `MockDataBase2`. Then run:
+
+```powershell
+python -m db.seed_load_test_data
+```
+
+This adds 30 clearly labeled synthetic students, teachers, courses, classes, enrollments, grade components, weights, and scores. It never deletes rows. To add a different-sized set, use `python -m db.seed_load_test_data --students 60` (1–100 students). Records use `LOAD-` IDs and sample emails under `example.test`. Re-running on the same date does not duplicate those records. Do not run this against the blank database you plan to use for the professor's checklist.
+
 ## Test calculations
 
 The expected grading bands and the 40% Midterm / 60% Finals calculation are implemented in `strategy/standard_calculator.py`. Run the automated tests with:
@@ -40,3 +50,4 @@ python -m pytest
 ```
 
 The checklist's 52 GUI/database scenarios still need to be run against a configured local PostgreSQL database before the application can be considered ready for demonstration.
+
