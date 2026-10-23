@@ -670,19 +670,29 @@ class GradeManagementGUI(ctk.CTk):
         card.pack(fill="x", pady=(0, 12))
         row = ctk.CTkFrame(card, fg_color="transparent")
         row.pack(fill="x", padx=14, pady=(6, 14))
-        ctk.CTkLabel(row, text="Class ID", text_color=self.MUTED).pack(side="left", padx=(0, 9))
-        class_id, class_choices = self._make_combo(row, self._reference_options("class"), width=290, height=36)
-        class_id.pack(side="left", padx=(0, 10))
-        list_card = self._card(page, "COMPONENT WEIGHTS")
+        row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(row, text="Class", text_color=self.MUTED).grid(
+            row=0, column=0, sticky="w", padx=(0, 10))
+        class_id, class_choices = self._make_combo(
+            row, self._reference_options("class"), width=520, height=36)
+        class_id.grid(row=0, column=1, sticky="ew", padx=(0, 10))
+        list_card = self._card(page, "WEIGHTS BY GRADING PERIOD")
         list_card.pack(fill="both", expand=True)
-        area = ctk.CTkScrollableFrame(list_card, fg_color="transparent")
-        area.pack(fill="both", expand=True, padx=10, pady=(6, 12))
+        ctk.CTkLabel(list_card, text="Set each component’s share. Every period must add up to 100%.",
+                     text_color=self.MUTED, font=ctk.CTkFont(size=10))\
+            .pack(anchor="w", padx=16, pady=(0, 8))
+        area = ctk.CTkFrame(list_card, fg_color="transparent")
+        area.pack(fill="both", expand=True, padx=12, pady=(0, 14))
         entries = {}
+        period_entries = {}
+        period_totals = {}
 
         def load():
             for child in area.winfo_children():
                 child.destroy()
             entries.clear()
+            period_entries.clear()
+            period_totals.clear()
             class_value = class_choices.get(class_id.get())
             if not class_value:
                 raise ValueError("Choose a class first.")
@@ -694,17 +704,58 @@ class GradeManagementGUI(ctk.CTk):
                 ORDER BY gp.period_order,gc.component_id""", (class_value, class_value, class_value))
             if not rows:
                 raise ValueError("No grade components were found for this class term.")
-            for i, label in enumerate(("PERIOD", "COMPONENT", "WEIGHT (%)")):
-                ctk.CTkLabel(area, text=label, text_color=self.CYAN,
-                             font=ctk.CTkFont(family="Consolas", size=10, weight="bold"))\
-                    .grid(row=0, column=i, sticky="w", padx=12, pady=(8, 12))
-            for i, (cid, name, period, _period_id, pct) in enumerate(rows, 1):
-                ctk.CTkLabel(area, text=period, text_color=self.MUTED).grid(row=i, column=0, sticky="w", padx=12, pady=6)
-                ctk.CTkLabel(area, text=name, text_color=self.TEXT).grid(row=i, column=1, sticky="w", padx=12, pady=6)
-                entry = ctk.CTkEntry(area, width=120, height=34, fg_color="#0e1729", border_color=self.BORDER)
-                entry.insert(0, str(pct))
-                entry.grid(row=i, column=2, sticky="w", padx=12, pady=5)
-                entries[cid] = entry
+            grouped = {}
+            period_names = {}
+            for cid, name, period, period_id, pct in rows:
+                grouped.setdefault(period_id, []).append((cid, name, pct))
+                period_names[period_id] = period
+
+            for column in range(2):
+                area.grid_columnconfigure(column, weight=1, uniform="period_cards")
+
+            def update_total(period_id):
+                try:
+                    total = sum(float(entry.get().strip() or 0)
+                                for entry in period_entries.get(period_id, []))
+                    valid = abs(total - 100.0) < 0.005
+                    period_totals[period_id].configure(
+                        text=f"Total  {total:.2f}%  ·  {'Ready to save' if valid else 'Must equal 100%'}",
+                        text_color=self.GREEN if valid else self.MUTED)
+                except ValueError:
+                    period_totals[period_id].configure(
+                        text="Total  Check the entered numbers", text_color=self.RED)
+
+            for index, (period_id, components) in enumerate(grouped.items()):
+                period_card = self._card(area, period_names[period_id].upper())
+                period_card.grid(row=index // 2, column=index % 2, sticky="nsew",
+                                 padx=5, pady=5)
+                body = ctk.CTkFrame(period_card, fg_color="transparent")
+                body.pack(fill="both", expand=True, padx=12, pady=(2, 10))
+                body.grid_columnconfigure(0, weight=1)
+                body.grid_columnconfigure(1, weight=0)
+                ctk.CTkLabel(body, text="COMPONENT", text_color=self.CYAN,
+                             font=ctk.CTkFont(family="Consolas", size=9, weight="bold"))\
+                    .grid(row=0, column=0, sticky="w", padx=(4, 8), pady=(2, 6))
+                ctk.CTkLabel(body, text="WEIGHT", text_color=self.CYAN,
+                             font=ctk.CTkFont(family="Consolas", size=9, weight="bold"))\
+                    .grid(row=0, column=1, sticky="e", padx=4, pady=(2, 6))
+                period_entries[period_id] = []
+                for row_index, (cid, name, pct) in enumerate(components, 1):
+                    ctk.CTkLabel(body, text=name, text_color=self.TEXT, anchor="w")\
+                        .grid(row=row_index, column=0, sticky="ew", padx=4, pady=4)
+                    entry = ctk.CTkEntry(body, width=112, height=32,
+                                         fg_color="#0e1729", border_color=self.BORDER)
+                    entry.insert(0, str(pct))
+                    entry.grid(row=row_index, column=1, sticky="e", padx=4, pady=3)
+                    entries[cid] = entry
+                    period_entries[period_id].append(entry)
+                    entry.bind("<KeyRelease>", lambda _event, pid=period_id: update_total(pid))
+                total_label = ctk.CTkLabel(body, text="", text_color=self.MUTED,
+                                           font=ctk.CTkFont(size=10, weight="bold"))
+                total_label.grid(row=len(components) + 1, column=0, columnspan=2,
+                                 sticky="w", padx=4, pady=(8, 2))
+                period_totals[period_id] = total_label
+                update_total(period_id)
 
         def save():
             if not entries:
@@ -713,8 +764,10 @@ class GradeManagementGUI(ctk.CTk):
                 str(class_choices[class_id.get()]), {cid: entry.get().strip() for cid, entry in entries.items()})
             messagebox.showinfo("Weights saved", "The grading weights have been saved.", parent=self)
 
-        self._button(row, "Load components", load, self.BLUE).pack(side="left", padx=4)
-        self._button(row, "Save weights", save, self.GREEN, "#071a16").pack(side="left", padx=4)
+        self._button(row, "Load components", load, self.BLUE).grid(
+            row=0, column=2, padx=(0, 8))
+        self._button(row, "Save weights", save, self.GREEN, "#071a16").grid(
+            row=0, column=3)
 
     def show_scores_page(self):
         self._set_page("Score Entry", "scores")
