@@ -1355,6 +1355,7 @@ class GradeManagementGUI(ctk.CTk):
         ctk.CTkLabel(report_row, text="Choose a class or student", text_color=self.MUTED,
                      font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=1, sticky="w", padx=5, pady=(0, 4))
         kind = ctk.CTkComboBox(report_row, values=["Class list", "Grade sheet", "Student grade report"],
+                               state="readonly",
                                width=220, height=36, fg_color=self.INPUT, border_color=self.BORDER,
                                button_color=self.BLUE, dropdown_fg_color=self.PANEL)
         kind.set("Class list")
@@ -1381,34 +1382,61 @@ class GradeManagementGUI(ctk.CTk):
         kind.configure(command=refresh_report_choices)
         refresh_report_choices()
 
-        output_card = self._card(page, "REPORT DISPLAY  /  GRADES AND CLASS LIST")
+        output_card = self._card(page, "PRINT-READY REPORT PREVIEW")
         output_card.pack(fill="both", expand=True)
-        report_header = ctk.CTkLabel(output_card, text="Select a report type and record, then choose Show report.",
-                                     text_color=self.MUTED, justify="left", anchor="w",
-                                     font=ctk.CTkFont(size=13, weight="bold"), wraplength=1200)
-        report_header.pack(fill="x", padx=16, pady=(4, 10))
-        table_wrap = ctk.CTkFrame(output_card, fg_color=self.INPUT, corner_radius=9,
+        paper = ctk.CTkFrame(output_card, fg_color="#fbfcfe", corner_radius=6,
+                             border_width=1, border_color=self.BORDER)
+        paper.pack(fill="both", expand=True, padx=12, pady=(2, 12))
+        ctk.CTkLabel(paper, text="STUDENT INFORMATION AND GRADING SYSTEM",
+                     text_color=self.CYAN,
+                     font=ctk.CTkFont(family="Consolas", size=10, weight="bold"))\
+            .pack(anchor="w", padx=22, pady=(17, 2))
+        document_title = ctk.CTkLabel(
+            paper, text="Select a report type and record, then choose Show report.",
+            text_color=self.TEXT, justify="left", anchor="w",
+            font=ctk.CTkFont(size=22, weight="bold"), wraplength=1200,
+        )
+        document_title.pack(fill="x", padx=22, pady=(2, 10))
+        metadata_frame = ctk.CTkFrame(paper, fg_color="#f1f5f9", corner_radius=7)
+        metadata_frame.pack(fill="x", padx=20, pady=(0, 8))
+        generated_label = ctk.CTkLabel(paper, text="", text_color=self.MUTED,
+                                       font=ctk.CTkFont(size=10))
+        generated_label.pack(anchor="e", padx=22, pady=(0, 7))
+
+        table_wrap = ctk.CTkFrame(paper, fg_color="#ffffff", corner_radius=5,
                                   border_width=1, border_color=self.BORDER)
-        table_wrap.pack(fill="both", expand=True, padx=12, pady=(0, 8))
-        ttk.Style(self).configure("Report.Treeview", rowheight=42,
-                                  font=("Segoe UI", 12), background=self.CARD,
-                                  fieldbackground=self.CARD, foreground=self.TEXT)
-        report_table = ttk.Treeview(table_wrap, columns=(), show="headings", height=12,
+        table_wrap.pack(fill="both", expand=True, padx=20, pady=(0, 8))
+        report_style = ttk.Style(self)
+        report_style.configure("Report.Treeview", rowheight=32,
+                               font=("Segoe UI", 10), background="#ffffff",
+                               fieldbackground="#ffffff", foreground="#203047")
+        report_style.configure("Report.Treeview.Heading", background="#e8eef5",
+                               foreground="#203047", relief="flat",
+                               font=("Segoe UI Semibold", 9))
+        report_style.map("Report.Treeview", background=[("selected", "#dbeafe")],
+                         foreground=[("selected", "#203047")])
+        report_table = ttk.Treeview(table_wrap, columns=(), show="headings", height=10,
                                     style="Report.Treeview")
-        report_table.pack(side="top", fill="both", expand=True, padx=5, pady=(5, 0))
+        report_table.pack(side="left", fill="both", expand=True, padx=(5, 0), pady=5)
         ybar = ttk.Scrollbar(table_wrap, orient="vertical", command=report_table.yview)
-        ybar.place(relx=1.0, rely=0, relheight=1.0, anchor="ne")
-        xbar = ttk.Scrollbar(output_card, orient="horizontal", command=report_table.xview)
-        xbar.pack(fill="x", padx=17, pady=(0, 8))
+        ybar.pack(side="right", fill="y", padx=(0, 5), pady=5)
+        xbar = ttk.Scrollbar(paper, orient="horizontal", command=report_table.xview)
+        xbar.pack(fill="x", padx=22, pady=(0, 8))
         report_table.configure(yscrollcommand=ybar.set, xscrollcommand=xbar.set)
-        report_summary = ctk.CTkLabel(output_card, text="", text_color=self.CYAN,
-                                      font=ctk.CTkFont(family="Consolas", size=13, weight="bold"),
-                                      anchor="w", justify="left")
-        report_summary.pack(fill="x", padx=16, pady=(0, 12))
+        report_table.tag_configure("alternate", background="#f4f7fb")
+        report_summary = ctk.CTkLabel(paper, text="", text_color=self.TEXT,
+                                      font=ctk.CTkFont(size=12, weight="bold"),
+                                      anchor="w", justify="left", wraplength=1200)
+        report_summary.pack(fill="x", padx=22, pady=(0, 5))
+        ctk.CTkFrame(paper, height=1, fg_color=self.BORDER).pack(fill="x", padx=20, pady=(3, 5))
+        ctk.CTkLabel(paper, text="Prepared using the Grade Management System",
+                     text_color=self.MUTED, font=ctk.CTkFont(size=9))\
+            .pack(anchor="e", padx=22, pady=(0, 12))
 
         def display_report():
             record_id = report_choices.get(report_id.get())
-            self._render_report(kind.get(), record_id, report_header, report_table, report_summary)
+            self._render_report(kind.get(), record_id, document_title, metadata_frame,
+                                generated_label, report_table, report_summary)
 
         self._button(report_row, "Show report", display_report, self.CYAN, "#ffffff")\
             .grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=(5, 4))
@@ -1562,82 +1590,62 @@ class GradeManagementGUI(ctk.CTk):
         combo.pack()
         return combo, choices
 
-    def _render_report(self, kind, ident, heading, table, summary):
+    def _render_report(self, kind, ident, title_label, metadata_frame,
+                       generated_label, table, summary):
         if not ident or ident == "Choose a record":
             raise ValueError("Choose a class or student for this report.")
         if kind == "Class list":
             data = self.report_service.get_class_list_report(ident)
         elif kind == "Grade sheet":
             data = self.report_service.get_grade_sheet_report(ident)
-        else:
+        elif kind == "Student grade report":
             data = self.report_service.get_student_grade_report(ident)
+        else:
+            raise ValueError("Choose a valid report type.")
+        document = self.report_service.build_print_document(kind, data)
         for item in table.get_children():
             table.delete(item)
-        summary.configure(text="")
+        title_label.configure(text=document.title)
+        for child in metadata_frame.winfo_children():
+            child.destroy()
+        for column in range(3):
+            metadata_frame.grid_columnconfigure(column, weight=1, uniform="report_metadata")
+        for index, (label, value) in enumerate(document.metadata):
+            row, column = divmod(index, 3)
+            cell = ctk.CTkFrame(metadata_frame, fg_color="transparent")
+            cell.grid(row=row, column=column, sticky="ew", padx=10, pady=7)
+            ctk.CTkLabel(cell, text=label.upper(), text_color=self.MUTED,
+                         font=ctk.CTkFont(size=9, weight="bold"))\
+                .pack(anchor="w")
+            ctk.CTkLabel(cell, text=value, text_color=self.TEXT,
+                         font=ctk.CTkFont(size=11), anchor="w", justify="left",
+                         wraplength=270).pack(anchor="w", fill="x")
+        generated_label.configure(
+            text="Generated " + document.generated_at.astimezone().strftime("%B %d, %Y at %I:%M %p"))
 
-        if kind in {"Class list", "Grade sheet"}:
-            header = data["header"]
-            semester = header["semester"]
-            semester = semester if "semester" in semester.lower() else semester + " Semester"
-            heading.configure(text=(
-                f"{header['subject_code']} — {header['subject_name']}  |  Section {header['section']}\n"
-                f"Teacher: {header['teacher_name']} — {header['department']}\n"
-                f"School Year: {header['school_year']}  |  {semester}  |  "
-                f"Schedule: {header['schedule'] or '—'}  |  Room: {header['room'] or '—'}"
-            ), text_color=self.TEXT)
-            if kind == "Class list":
-                columns = ("number", "student", "course")
-                headings = ("No.", "Student Name", "Course")
-                rows = [(index, f"{row['last_name']}, {row['first_name']}", row["program"])
-                        for index, row in enumerate(data["records"], 1)]
-            else:
-                columns = ("number", "student", "course", "midterm", "finals")
-                headings = ("No.", "Student", "Course", "MG", "FG")
-                rows = [(index, f"{row['last_name']}, {row['first_name']}", row["program"],
-                         self._report_value(row["midterm_equiv"]),
-                         self._report_value(row["final_equiv"]))
-                        for index, row in enumerate(data["records"], 1)]
-            table.configure(columns=columns)
-            for column, title in zip(columns, headings):
-                table.heading(column, text=title)
-            for column in columns:
-                table.column(column, width=110 if column in {"number", "course", "midterm", "finals"} else 260,
-                             minwidth=70, anchor="center" if column in {"number", "course", "midterm", "finals"} else "w",
-                             stretch=column in {"student"})
-            for row in rows:
-                table.insert("", "end", values=row)
+        column_keys = tuple(key for key, _label in document.columns)
+        table.configure(columns=column_keys, displaycolumns=column_keys)
+        numeric_columns = {"number", "units", "midterm", "finals", "grade"}
+        width_by_column = {
+            "number": 60, "student_id": 120, "student": 220, "program": 100,
+            "midterm": 115, "finals": 115, "remarks": 180,
+            "school_year": 120, "semester": 105, "subject_code": 120,
+            "subject": 210, "teacher": 180, "units": 70, "grade": 105,
+        }
+        for (key, label) in document.columns:
+            table.heading(key, text=label)
+            table.column(key, width=width_by_column.get(key, 140), minwidth=60,
+                         anchor="center" if key in numeric_columns else "w",
+                         stretch=key in {"student", "subject", "teacher", "remarks"})
+        for index, row in enumerate(document.rows):
+            tags = ("alternate",) if index % 2 else ()
+            table.insert("", "end", values=row, tags=tags)
+
+        if document.summary:
+            summary_text = "     •     ".join(f"{label}: {value}" for label, value in document.summary)
         else:
-            student = data["student"]
-            year_level = int(student["year_level"])
-            ordinal = f"{year_level}{'st' if year_level == 1 else 'nd' if year_level == 2 else 'rd' if year_level == 3 else 'th'} year"
-            heading.configure(text=(
-                f"Student Name: {student['last_name']}, {student['first_name']}  |  "
-                f"Course: {student['program']}  |  Year: {ordinal}"
-            ), text_color=self.TEXT)
-            columns = ("number", "code", "description", "teacher", "units", "grade")
-            headings = ("No.", "Subject Code", "Description", "Teacher", "Units", "F Grade")
-            table.configure(columns=columns)
-            for column, title in zip(columns, headings):
-                table.heading(column, text=title)
-            for column, width in zip(columns, (55, 125, 330, 190, 70, 90)):
-                table.column(column, width=width, minwidth=55,
-                             anchor="center" if column in {"number", "units", "grade"} else "w",
-                             stretch=column in {"description", "teacher"})
-            for index, row in enumerate(data["records"], 1):
-                table.insert("", "end", values=(
-                    index, row["subject_code"], row["description"], row["teacher_name"],
-                    row["units"], self._report_value(row["final_grade"]),
-                ))
-            gwa = self._report_value(data["gwa"])
-            summary.configure(text=f"Total Units: {data['total_units']}     "
-                                     f"No. of Subjects: {data['no_of_subjects']}     "
-                                     f"Grade Weighted Average: {gwa}")
-
-        if not table.get_children():
-            summary.configure(text="No records were found for this report." if not summary.cget("text")
-                              else summary.cget("text"))
-
-    @staticmethod
-    def _report_value(value):
-        return "Incomplete" if value is None else f"{float(value):.2f}"
+            summary_text = ""
+        if not document.rows:
+            summary_text = (summary_text + "     •     " if summary_text else "") + "No records to display."
+        summary.configure(text=summary_text)
 
