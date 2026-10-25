@@ -95,8 +95,11 @@ class GradeManagementGUI(ctk.CTk):
         ctk.set_default_color_theme("blue")
         super().__init__()
         self.title("Grade Management System  |  Academic Workspace")
-        self.geometry("1450x900")
-        self.minsize(1120, 720)
+        initial_size, minimum_size = self._startup_window_size(
+            self.winfo_screenwidth(), self.winfo_screenheight())
+        self.geometry(f"{initial_size[0]}x{initial_size[1]}")
+        self.minsize(*minimum_size)
+        self.resizable(True, True)
         self.configure(fg_color=self.BG)
 
         self.grade_repo = GradeRepository()
@@ -112,7 +115,28 @@ class GradeManagementGUI(ctk.CTk):
         self._build_sidebar()
         self._build_workspace()
         self.show_dashboard()
+        self.after_idle(self._maximize_on_startup)
         self.after(250, self.check_database)
+
+    @staticmethod
+    def _startup_window_size(screen_width, screen_height):
+        """Choose usable startup and minimum sizes for the detected display."""
+        available_width = max(640, screen_width - 40)
+        available_height = max(480, screen_height - 80)
+        initial = (min(1450, available_width), min(900, available_height))
+        minimum = (min(900, available_width), min(560, available_height))
+        return initial, minimum
+
+    def _maximize_on_startup(self):
+        """Start maximized while keeping ordinary window resizing available."""
+        try:
+            self.state("zoomed")
+        except tk.TclError:
+            try:
+                self.attributes("-zoomed", True)
+            except tk.TclError:
+                width, height = self.winfo_screenwidth(), self.winfo_screenheight()
+                self.geometry(f"{width}x{height}+0+0")
 
     def _configure_tree_style(self):
         style = ttk.Style(self)
