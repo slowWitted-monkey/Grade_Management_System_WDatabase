@@ -27,6 +27,8 @@ This Python and Tkinter project uses PostgreSQL for students, teachers, subjects
    python main.py
    ```
 
+The application opens maximized to use the available display area. Restore it with the title-bar button to resize it normally. PostgreSQL connection attempts stop after five seconds by default; set `DB_CONNECT_TIMEOUT` in `.env` to change that limit.
+
 `db/schema.sql` is idempotent and does not drop tables. Use a new empty database when switching from an older project schema, because `CREATE TABLE IF NOT EXISTS` does not convert existing tables. Do not run a destructive reset against a database containing records you need.
 
 The instructor's live demonstration checklist requires a blank database before the test data is entered. `seed_db.py` now creates missing tables only and does not add sample records.
