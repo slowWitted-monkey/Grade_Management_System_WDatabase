@@ -24,6 +24,7 @@ def test_class_list_becomes_an_export_friendly_report_document():
     assert document.generated_at == generated_at
     assert dict(document.metadata)["Semester"] == "1st Semester"
     assert document.rows == (("1", "2026-0001", "Dela Cruz, Juan", "BSCS"),)
+    assert len(document.rows[0]) == len(document.columns)
     assert document.summary == (("Enrolled Students", "1"),)
 
 
@@ -41,6 +42,7 @@ def test_grade_sheet_formats_missing_grades_as_incomplete():
     document = ReportService().build_print_document("Grade sheet", data)
 
     assert document.rows[0][4:7] == ("Incomplete", "91.50", "Passed")
+    assert len(document.rows[0]) == len(document.columns)
 
 
 def test_student_report_includes_term_columns_and_summary():
@@ -60,5 +62,6 @@ def test_student_report_includes_term_columns_and_summary():
     assert "semester" in [key for key, _label in document.columns]
     assert document.rows[0][1] == "1st Semester"
     assert document.rows[0][-2:] == ("88.00", "—")
+    assert len(document.rows[0]) == len(document.columns)
     assert document.summary[-1] == ("Grade Weighted Average", "88.00")
 
