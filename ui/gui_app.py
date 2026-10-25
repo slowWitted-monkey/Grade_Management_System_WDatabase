@@ -207,7 +207,7 @@ class GradeManagementGUI(ctk.CTk):
             child.destroy()
         self.page_title.configure(text=title)
         self._highlight_nav(nav_key)
-        self.content.grid_rowconfigure(0, weight=0)
+        self.content.grid_rowconfigure(0, weight=1)
 
     def _after_page(self, delay_ms, callback):
         """Run a deferred page action only while its page is still active."""
@@ -1115,7 +1115,7 @@ class GradeManagementGUI(ctk.CTk):
         page.grid_columnconfigure(0, weight=1)
         self._section_intro(
             page, "Review database activity",
-            "Search recent changes made in this application. New records include before-and-after values.")
+            "Search changes recorded by this application and inspect the before-and-after values.")
 
         filters = self._card(page, "FILTER AUDIT HISTORY")
         filters.pack(fill="x", pady=(0, 10))
@@ -1215,6 +1215,8 @@ class GradeManagementGUI(ctk.CTk):
                 search=search_entry.get().strip() or None,
             )
             tree.delete(*tree.get_children())
+            set_detail(old_box, "Select an entry to view its previous values.")
+            set_detail(new_box, "Select an entry to view its updated values.")
             for log_id, table_name, record_id, action, old_value, new_value, changed_by, changed_at in rows:
                 tree.insert("", "end", values=(log_id, changed_at, table_name, record_id,
                                                  action, changed_by, old_value, new_value))
