@@ -1,6 +1,7 @@
 """Modern dashboard for the student information and grading system."""
 
-from datetime import date
+from datetime import date, datetime
+import re
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -10,6 +11,29 @@ from config.database import get_db_connection
 from repository.grade_repository import GradeRepository
 from service.grading_service import GradingService
 from service.report_service import ReportService
+
+
+class ScheduleField(ctk.CTkFrame):
+    """Read-only schedule display with a guided day and time picker."""
+
+    def __init__(self, parent, open_editor):
+        super().__init__(parent, fg_color="transparent")
+        self.value = tk.StringVar()
+        ctk.CTkEntry(
+            self, textvariable=self.value, state="readonly", height=35,
+            corner_radius=8, fg_color="#f8fafc", border_color="#c3cdd9",
+            text_color="#203047", placeholder_text="Choose days and time",
+        ).pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(
+            self, text="Set", width=48, height=35, corner_radius=8,
+            command=lambda: open_editor(self),
+        ).pack(side="right", padx=(5, 0))
+
+    def get(self):
+        return self.value.get()
+
+    def set(self, value):
+        self.value.set("" if value is None else str(value))
 
 
 class GradeManagementGUI(ctk.CTk):
@@ -28,6 +52,16 @@ class GradeManagementGUI(ctk.CTk):
     GREEN = "#327454"
     AMBER = "#93651f"
     RED = "#a64853"
+
+    SCHEDULE_DAYS = (
+        "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun",
+        "Mon/Wed", "Tue/Thu", "Mon/Wed/Fri", "Tue/Thu/Sat",
+    )
+    SCHEDULE_TIMES = tuple(
+        f"{hour:02d}:{minute:02d}"
+        for hour in range(7, 22)
+        for minute in (0, 30)
+    ) + ("22:00",)
 
     TABLES = {
         "Students": ("student", "student_id", ["student_id", "first_name", "last_name", "program", "year_level", "email", "status"]),
@@ -498,12 +532,170 @@ class GradeManagementGUI(ctk.CTk):
             definitions["status"] = [("Enrolled", "Enrolled"), ("Dropped", "Dropped"), ("Completed", "Completed")]
         elif table == "grade_component":
             definitions["type"] = [(value, value) for value in ("Quiz", "Assignment", "Laboratory", "Project", "Exam", "Other")]
+            definitions["max_score"] = self._stored_options(
+                "grade_component", "max_score",
+                (10, 20, 25, 30, 40, 50, 75, 100),
+                labeler=lambda value: f"{value:g} points",
+            )
         elif table in {"class_offering", "grading_period"}:
             definitions["school_year"] = self._school_year_options()
             definitions["semester"] = self._semester_options()
+        if table == "class_offering":
+            definitions["section"] = self._stored_options(
+                "class_offering", "section", tuple("ABCDEFGH"),
+                labeler=lambda value: f"Section {value}" if len(value) == 1 else value,
+            )
+            definitions["room"] = self._stored_options(
+                "class_offering", "room",
+                ("Room 101", "Room 102", "Room 103", "Room 201", "Room 202",
+                 "Computer Laboratory", "Science Laboratory", "Online"),
+            )
+        if table == "grading_period":
+            definitions["name"] = self._stored_options(
+                "grading_period", "name", ("Prelim", "Midterm", "Pre-Final", "Finals", "Summer"))
+            definitions["period_order"] = self._stored_options(
+                "grading_period", "period_order", (1, 2, 3, 4),
+                labeler=lambda value: f"Period {value}",
+            )
+        if table == "subject":
+            definitions["units"] = self._stored_options(
+                "subject", "units", (1, 2, 3, 4, 5, 6),
+                labeler=lambda value: f"{value} unit" if value == 1 else f"{value} units",
+            )
         if table == "student":
             definitions["year_level"] = [(str(n), f"{n} — {n}{'st' if n == 1 else 'nd' if n == 2 else 'rd' if n == 3 else 'th'} year") for n in range(1, 9)]
         return definitions
+
+    def _open_schedule_picker(self, schedule_field):
+        current = self._parse_schedule(schedule_field.get())
+        days_default, start_default, end_default = current or ("Mon/Wed", "09:00", "10:00")
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Set class schedule")
+        dialog.geometry("470x330")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        ctk.CTkLabel(dialog, text="Choose meeting days and time", text_color=self.TEXT,
+                     font=ctk.CTkFont(size=18, weight="bold"))\
+            .pack(anchor="w", padx=22, pady=(22, 4))
+        ctk.CTkLabel(dialog, text="Common day patterns and 30-minute time options are ready to select.",
+                     text_color=self.MUTED, font=ctk.CTkFont(size=11))\
+            .pack(anchor="w", padx=22, pady=(0, 16))
+
+        form = ctk.CTkFrame(dialog, fg_color="transparent")
+        form.pack(fill="x", padx=18)
+        form.grid_columnconfigure((0, 1), weight=1)
+        def add_choice(label, values, row, col, default):
+            ctk.CTkLabel(form, text=label, text_color=self.MUTED,
+                         font=ctk.CTkFont(size=10, weight="bold"))\
+                .grid(row=row, column=col, sticky="w", padx=5, pady=(0, 5))
+            combo = ctk.CTkComboBox(
+                form, values=list(values), state="readonly", height=36,
+                fg_color=self.INPUT, border_color=self.BORDER,
+                button_color=self.BLUE, dropdown_fg_color=self.PANEL,
+            )
+            combo.set(default)
+            combo.grid(row=row + 1, column=col, sticky="ew", padx=5, pady=(0, 12))
+            return combo
+
+        days = add_choice("DAYS", self.SCHEDULE_DAYS, 0, 0, days_default)
+        start_time = add_choice("START TIME", self.SCHEDULE_TIMES, 0, 1, start_default)
+        end_time = add_choice("END TIME", self.SCHEDULE_TIMES, 2, 0, end_default)
+        preview = ctk.CTkLabel(dialog, text="", text_color=self.CYAN,
+                               font=ctk.CTkFont(family="Consolas", size=12, weight="bold"))
+        preview.pack(anchor="w", padx=23, pady=(2, 14))
+
+        def update_preview(_value=None):
+            try:
+                value = self._format_schedule(days.get(), start_time.get(), end_time.get())
+                preview.configure(text="Preview:  " + value, text_color=self.CYAN)
+            except ValueError as exc:
+                preview.configure(text=str(exc), text_color=self.RED)
+
+        for combo in (days, start_time, end_time):
+            combo.configure(command=update_preview)
+        update_preview()
+
+        buttons = ctk.CTkFrame(dialog, fg_color="transparent")
+        buttons.pack(fill="x", side="bottom", padx=18, pady=(0, 18))
+        ctk.CTkButton(buttons, text="Cancel", fg_color=self.CARD_HOVER,
+                      text_color=self.TEXT, command=dialog.destroy)\
+            .pack(side="right", padx=(8, 0))
+
+        def save_schedule():
+            try:
+                schedule_field.set(self._format_schedule(
+                    days.get(), start_time.get(), end_time.get()))
+            except ValueError as exc:
+                messagebox.showwarning("Check schedule", str(exc), parent=dialog)
+                return
+            dialog.destroy()
+
+        ctk.CTkButton(buttons, text="Use this schedule", command=save_schedule,
+                      fg_color=self.BLUE).pack(side="right")
+
+    def _stored_options(self, table, field, suggested, *, labeler=str):
+        """Offer common choices while retaining values already used in this database."""
+        values = {str(value) for value in suggested}
+        try:
+            rows = self._query(
+                f"SELECT DISTINCT {field} FROM {table} WHERE {field} IS NOT NULL "
+                f"ORDER BY {field}"
+            )
+            values.update(str(row[0]) for row in rows if row[0] is not None)
+        except Exception:
+            pass
+        def sort_key(value):
+            try:
+                return (0, float(value), value)
+            except ValueError:
+                return (1, value.casefold(), value)
+        result = []
+        for value in sorted(values, key=sort_key):
+            try:
+                display_value = float(value)
+                if display_value.is_integer():
+                    display_value = int(display_value)
+            except ValueError:
+                display_value = value
+            result.append((value, labeler(display_value)))
+        return result
+
+    @staticmethod
+    def _format_schedule(days, start_time, end_time):
+        """Validate and format a schedule in the legacy database display format."""
+        if days not in GradeManagementGUI.SCHEDULE_DAYS:
+            raise ValueError("Choose a valid day or day combination.")
+        if (start_time not in GradeManagementGUI.SCHEDULE_TIMES
+                or end_time not in GradeManagementGUI.SCHEDULE_TIMES):
+            raise ValueError("Choose a time from the available 30-minute options.")
+        try:
+            start = datetime.strptime(start_time, "%H:%M")
+            end = datetime.strptime(end_time, "%H:%M")
+        except ValueError as exc:
+            raise ValueError("Choose valid start and end times.") from exc
+        if end <= start:
+            raise ValueError("The end time must be later than the start time.")
+        return f"{days} {start_time}-{end_time}"
+
+    @staticmethod
+    def _parse_schedule(value):
+        """Preselect the schedule editor when an existing value uses the standard format."""
+        match = re.fullmatch(
+            r"\s*(.*?)\s+(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\s*", value or "")
+        if not match:
+            return None
+        days, start_time, end_time = match.groups()
+        if (days not in GradeManagementGUI.SCHEDULE_DAYS
+                or start_time not in GradeManagementGUI.SCHEDULE_TIMES
+                or end_time not in GradeManagementGUI.SCHEDULE_TIMES):
+            return None
+        try:
+            GradeManagementGUI._format_schedule(days, start_time, end_time)
+        except ValueError:
+            return None
+        return days, start_time, end_time
 
     def _make_combo(self, parent, options, *, default=None, width=None, height=35, editable=False):
         """Create a dropdown and a display-label-to-stored-value map."""
@@ -597,7 +789,7 @@ class GradeManagementGUI(ctk.CTk):
         widgets = {}
         choice_maps = {}
         choice_definitions = self._choice_definitions(table)
-        editable_choices = {"program", "department"}
+        editable_choices = {"program", "department", "section", "room", "name", "max_score"}
         auto_keys = {"subject_id", "class_id", "enrollment_id", "period_id", "component_id"}
         field_defaults = {
             "student": {"status": "Active"},
@@ -622,7 +814,9 @@ class GradeManagementGUI(ctk.CTk):
             ctk.CTkLabel(cell, text=label, text_color=self.MUTED,
                          font=ctk.CTkFont(size=10, weight="bold"))\
                 .pack(anchor="w", padx=2, pady=(0, 5))
-            if field in choice_definitions:
+            if field == "schedule":
+                entry = ScheduleField(cell, self._open_schedule_picker)
+            elif field in choice_definitions:
                 entry, choice_maps[field] = self._make_combo(
                     cell, choice_definitions[field], default=field_defaults.get(field), height=35,
                     editable=field in editable_choices)
@@ -665,6 +859,9 @@ class GradeManagementGUI(ctk.CTk):
 
         def set_field(field, value):
             widget = widgets[field]
+            if field == "schedule":
+                widget.set(value)
+                return
             if field in choice_maps:
                 display = next((label for label, raw in choice_maps[field].items()
                                 if raw is not None and str(raw) == str(value)), None)
