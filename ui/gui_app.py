@@ -573,7 +573,8 @@ class GradeManagementGUI(ctk.CTk):
         days_default, start_default, end_default = current or ("Mon/Wed", "09:00", "10:00")
         dialog = ctk.CTkToplevel(self)
         dialog.title("Set class schedule")
-        dialog.geometry("470x330")
+        dialog.geometry("500x380")
+        dialog.minsize(500, 380)
         dialog.resizable(False, False)
         dialog.transient(self)
         dialog.grab_set()
@@ -602,8 +603,8 @@ class GradeManagementGUI(ctk.CTk):
             return combo
 
         days = add_choice("DAYS", self.SCHEDULE_DAYS, 0, 0, days_default)
-        start_time = add_choice("START TIME", self.SCHEDULE_TIMES, 0, 1, start_default)
-        end_time = add_choice("END TIME", self.SCHEDULE_TIMES, 2, 0, end_default)
+        start_time = add_choice("START TIME", self.SCHEDULE_TIMES, 2, 0, start_default)
+        end_time = add_choice("END TIME", self.SCHEDULE_TIMES, 2, 1, end_default)
         preview = ctk.CTkLabel(dialog, text="", text_color=self.CYAN,
                                font=ctk.CTkFont(family="Consolas", size=12, weight="bold"))
         preview.pack(anchor="w", padx=23, pady=(2, 14))
@@ -621,8 +622,9 @@ class GradeManagementGUI(ctk.CTk):
 
         buttons = ctk.CTkFrame(dialog, fg_color="transparent")
         buttons.pack(fill="x", side="bottom", padx=18, pady=(0, 18))
-        ctk.CTkButton(buttons, text="Cancel", fg_color=self.CARD_HOVER,
-                      text_color=self.TEXT, command=dialog.destroy)\
+        ctk.CTkButton(buttons, text="Cancel", width=100, height=36,
+                      fg_color=self.CARD_HOVER, text_color=self.TEXT,
+                      command=dialog.destroy)\
             .pack(side="right", padx=(8, 0))
 
         def save_schedule():
@@ -634,8 +636,8 @@ class GradeManagementGUI(ctk.CTk):
                 return
             dialog.destroy()
 
-        ctk.CTkButton(buttons, text="Use this schedule", command=save_schedule,
-                      fg_color=self.BLUE).pack(side="right")
+        ctk.CTkButton(buttons, text="Use this schedule", width=175, height=36,
+                      command=save_schedule, fg_color=self.BLUE).pack(side="right")
 
     def _stored_options(self, table, field, suggested, *, labeler=str):
         """Offer common choices while retaining values already used in this database."""
@@ -845,6 +847,23 @@ class GradeManagementGUI(ctk.CTk):
             border_color=self.BORDER, placeholder_text=f"Search {title.lower()}...",
         )
         search_entry.pack(side="left", padx=(0, 7))
+        search_examples = {
+            "Students": "Try a student ID (2026-0001), name (Juan or Dela Cruz), program (BSCS), email, year level, or status.",
+            "Teachers": "Try a teacher ID, name, email, department, or status.",
+            "Subjects": "Try a subject code, course name, description, or unit count.",
+            "Classes": "Try a class code, section, subject/teacher ID, school year, semester, room, or schedule.",
+            "Enrollments": "Try an enrollment ID, student ID, class ID/code, or enrollment status.",
+            "Grading Periods": "Try a period name, school year, semester, order number, or date.",
+            "Grade Components": "Try a component name, type, period ID, maximum score, or description.",
+        }
+        ctk.CTkLabel(
+            tree_card,
+            text=(search_examples.get(title, "Search using part of a value from this table.")
+                  + " Search checks all fields, ignores letter case, and matches partial text. "
+                  "Up to 1,000 matching records are shown; add more detail to narrow results."),
+            text_color=self.MUTED, font=ctk.CTkFont(size=10),
+            wraplength=1050, justify="left",
+        ).pack(anchor="w", padx=15, pady=(0, 4))
         controls = ctk.CTkFrame(tree_card, fg_color="transparent")
         controls.pack(fill="x", padx=12, pady=(6, 10))
         columns = tuple(fields)
@@ -891,6 +910,8 @@ class GradeManagementGUI(ctk.CTk):
 
         def refresh():
             tree.delete(*tree.get_children())
+            # Refreshing or searching invalidates the previous row selection.
+            clear()
             term = search_entry.get().strip()
             sql = f"SELECT {', '.join(fields)} FROM {table}"
             params = ()
@@ -898,7 +919,7 @@ class GradeManagementGUI(ctk.CTk):
                 predicates = [f"CAST({field} AS TEXT) ILIKE %s" for field in fields]
                 sql += " WHERE " + " OR ".join(predicates)
                 params = tuple(f"%{term}%" for _field in fields)
-            rows = self._query(sql + f" ORDER BY {key}", params)
+            rows = self._query(sql + f" ORDER BY {key} LIMIT 1000", params)
             for row in rows:
                 tree.insert("", "end", values=["" if value is None else value for value in row])
 
@@ -1402,6 +1423,13 @@ class GradeManagementGUI(ctk.CTk):
             border_color=self.BORDER, button_color=self.BLUE, dropdown_fg_color=self.CARD)
         action_filter.set("All actions")
         action_filter.grid(row=0, column=2, padx=5)
+        ctk.CTkLabel(
+            filters,
+            text=("Search by record ID, user, or text in the before/after values. "
+                  "Use the table and action dropdowns for those filters; partial, case-insensitive matches work."),
+            text_color=self.MUTED, font=ctk.CTkFont(size=10),
+            wraplength=1050, justify="left",
+        ).pack(anchor="w", padx=17, pady=(0, 10))
 
         log_card = self._card(page, "RECENT ACTIVITY")
         log_card.pack(fill="both", expand=True, pady=(0, 10))
