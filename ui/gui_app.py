@@ -1311,7 +1311,11 @@ class GradeManagementGUI(ctk.CTk):
 
     def show_reports_page(self):
         self._set_page("Compute & Reports", "reports")
-        page = ctk.CTkFrame(self.content, fg_color="transparent")
+        page = ctk.CTkScrollableFrame(
+            self.content, fg_color="transparent", corner_radius=0,
+            scrollbar_button_color=self.BORDER,
+            scrollbar_button_hover_color=self.MUTED,
+        )
         page.grid(row=0, column=0, sticky="nsew")
         page.grid_columnconfigure(0, weight=1)
         self._section_intro(page, "Compute grades and build reports",
@@ -1405,6 +1409,8 @@ class GradeManagementGUI(ctk.CTk):
 
         table_wrap = ctk.CTkFrame(paper, fg_color="#ffffff", corner_radius=5,
                                   border_width=1, border_color=self.BORDER)
+        table_wrap.configure(height=self._report_table_min_height(self.winfo_screenheight()))
+        table_wrap.pack_propagate(False)
         table_wrap.pack(fill="both", expand=True, padx=20, pady=(0, 8))
         report_style = ttk.Style(self)
         report_style.configure("Report.Treeview", rowheight=32,
@@ -1418,6 +1424,12 @@ class GradeManagementGUI(ctk.CTk):
         report_table = ttk.Treeview(table_wrap, columns=(), show="headings", height=10,
                                     style="Report.Treeview")
         report_table.pack(side="left", fill="both", expand=True, padx=(5, 0), pady=5)
+        empty_state = ctk.CTkLabel(
+            table_wrap, text="Choose a report above to preview its contents.",
+            fg_color="#f1f5f9", text_color=self.MUTED, corner_radius=8,
+            font=ctk.CTkFont(size=12), width=360, height=40,
+        )
+        empty_state.place(relx=0.5, rely=0.5, anchor="center")
         ybar = ttk.Scrollbar(table_wrap, orient="vertical", command=report_table.yview)
         ybar.pack(side="right", fill="y", padx=(0, 5), pady=5)
         xbar = ttk.Scrollbar(paper, orient="horizontal", command=report_table.xview)
@@ -1436,7 +1448,7 @@ class GradeManagementGUI(ctk.CTk):
         def display_report():
             record_id = report_choices.get(report_id.get())
             self._render_report(kind.get(), record_id, document_title, metadata_frame,
-                                generated_label, report_table, report_summary)
+                                generated_label, report_table, empty_state, report_summary)
 
         self._button(report_row, "Show report", display_report, self.CYAN, "#ffffff")\
             .grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=(5, 4))
@@ -1590,8 +1602,13 @@ class GradeManagementGUI(ctk.CTk):
         combo.pack()
         return combo, choices
 
+    @staticmethod
+    def _report_table_min_height(screen_height):
+        """Keep the report body usable while adapting it to short displays."""
+        return max(180, min(480, screen_height - 480))
+
     def _render_report(self, kind, ident, title_label, metadata_frame,
-                       generated_label, table, summary):
+                       generated_label, table, empty_state, summary):
         if not ident or ident == "Choose a record":
             raise ValueError("Choose a class or student for this report.")
         if kind == "Class list":
@@ -1640,6 +1657,14 @@ class GradeManagementGUI(ctk.CTk):
         for index, row in enumerate(document.rows):
             tags = ("alternate",) if index % 2 else ()
             table.insert("", "end", values=row, tags=tags)
+        if document.rows:
+            empty_state.place_forget()
+        else:
+            message = ("No enrolled subjects were found for this student."
+                       if kind == "Student grade report"
+                       else "No enrolled students were found for this class.")
+            empty_state.configure(text=message)
+            empty_state.place(relx=0.5, rely=0.5, anchor="center")
 
         if document.summary:
             summary_text = "     •     ".join(f"{label}: {value}" for label, value in document.summary)
