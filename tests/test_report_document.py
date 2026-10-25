@@ -1,6 +1,17 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from service.report_service import ReportService
+from ui.gui_app import GradeManagementGUI
+
+
+@pytest.mark.parametrize(
+    ("screen_height", "expected"),
+    [(1080, 480), (768, 288), (600, 180)],
+)
+def test_report_preview_keeps_a_usable_table_height(screen_height, expected):
+    assert GradeManagementGUI._report_table_min_height(screen_height) == expected
 
 
 def test_class_list_becomes_an_export_friendly_report_document():
