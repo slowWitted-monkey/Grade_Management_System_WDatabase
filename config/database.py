@@ -1,15 +1,29 @@
 import os
+from pathlib import Path
+
 import psycopg2
 from dotenv import load_dotenv
 
-# Load key-value pairs from .env into os.environ
-load_dotenv()
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(PROJECT_ROOT / ".env")
+
 
 def get_db_connection():
+    """Open the local PostgreSQL database using the project's .env settings."""
+    password = os.getenv("DB_PASSWORD")
+    if not password:
+        raise RuntimeError(
+            "DB_PASSWORD is not set. Copy .env.example to .env and enter your "
+            "local PostgreSQL password. Never commit .env."
+        )
+
     return psycopg2.connect(
         host=os.getenv("DB_HOST", "localhost"),
-        port=os.getenv("DB_PORT", "5432"),
+        port=int(os.getenv("DB_PORT", "5432")),
         database=os.getenv("DB_NAME", "Almodiente_CSPC103"),
         user=os.getenv("DB_USER", "postgres"),
-        password=os.getenv("DB_PASSWORD")
+        password=password,
+        connect_timeout=max(1, int(os.getenv("DB_CONNECT_TIMEOUT", "5"))),
     )
+

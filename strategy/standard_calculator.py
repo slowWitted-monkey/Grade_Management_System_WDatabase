@@ -1,58 +1,73 @@
+from decimal import Decimal, ROUND_HALF_UP
+
+
+def _value(item, key):
+    return item[key] if isinstance(item, dict) else getattr(item, key)
+
+
 class StandardGradeCalculator:
+    """The grading scale and weighting rules used by the project."""
 
     @staticmethod
-    def get_grade_point(percentage: float) -> tuple[float, str]:
-        """Converts percentage to Grade Point Equivalent and Remarks."""
+    def get_grade_point(percentage: float):
         if percentage is None:
             return None, "Incomplete"
 
-        p = round(percentage, 2)
-        if 97.00 <= p <= 100.00:
-            return 1.00, "Passed"
-        elif 94.00 <= p < 97.00:
-            return 1.25, "Passed"
-        elif 91.00 <= p < 94.00:
-            return 1.50, "Passed"
-        elif 88.00 <= p < 91.00:
-            return 1.75, "Passed"
-        elif 85.00 <= p < 88.00:
-            return 2.00, "Passed"
-        elif 82.00 <= p < 85.00:
-            return 2.25, "Passed"
-        elif 79.00 <= p < 82.00:
-            return 2.50, "Passed"
-        elif 76.00 <= p < 79.00:
-            return 2.75, "Passed"
-        elif 75.00 <= p < 76.00:
-            return 3.00, "Passed"
-        else:
-            return 5.00, "Failed"
+        # The professor's scale uses the unrounded percentage at every boundary.
+        p = Decimal(str(percentage))
+        bands = (
+            (97, 1.00), (94, 1.25), (91, 1.50), (88, 1.75),
+            (85, 2.00), (82, 2.25), (79, 2.50), (76, 2.75), (75, 3.00),
+        )
+        for minimum, point in bands:
+            if p >= Decimal(str(minimum)):
+                return point, "Passed"
+        return 5.00, "Failed"
 
-    def compute_period_grade(self, scores: list, percentages: list) -> float:
-        """Computes weighted period grade from component scores and weights."""
-        if not scores or not percentages:
-            return 0.0
+    def compute_period_grade(self, scores: list, percentages: list):
+        if not percentages:
+            raise ValueError("Grading weights have not been configured.")
 
-        total_weighted_score = 0.0
-        total_weight = 0.0
+        weights = {}
+        for item in percentages:
+            component_id = str(_value(item, "component_id"))
+            weight = Decimal(str(_value(item, "percentage")))
+            if weight < 0 or weight > 100:
+                raise ValueError("Each component weight must be between 0 and 100%.")
+            if component_id in weights:
+                raise ValueError(f"Duplicate weight for component {component_id}.")
+            weights[component_id] = weight
 
-        for score_info, weight_info in zip(scores, percentages):
-            score = score_info["score"]
-            max_score = score_info["max_score"]
-            weight = weight_info["percentage"]
+        if sum(weights.values()) != Decimal("100"):
+            raise ValueError(
+                f"Weights must total 100%; the current total is {sum(weights.values())}%."
+            )
 
-            if max_score > 0:
-                weighted_component = (score / max_score) * weight
-                total_weighted_score += weighted_component
-                total_weight += weight
+        score_by_component = {str(_value(s, "component_id")): s for s in scores}
+        missing = set(weights) - set(score_by_component)
+        if missing:
+            return None
 
-        return round(total_weighted_score, 2)
+        total = Decimal("0")
+        for component_id, weight in weights.items():
+            item = score_by_component[component_id]
+            score = Decimal(str(_value(item, "score")))
+            max_score_value = _value(item, "max_score")
+            if max_score_value is None or Decimal(str(max_score_value)) <= 0:
+                raise ValueError(f"Invalid maximum score for component {component_id}.")
+            maximum = Decimal(str(max_score_value))
+            if score < 0 or score > maximum:
+                raise ValueError(f"Score for component {component_id} must be between 0 and {maximum}.")
+            total += (score / maximum) * weight
 
-    def compute_overall_grade(self, midterm_pct: float, finals_pct: float) -> tuple[float, float, str]:
-        """Computes Overall % = (Midterm * 0.40) + (Finals * 0.60) and derives Grade Point."""
+        return float(total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+    def compute_overall_grade(self, midterm_pct: float, finals_pct: float):
         if midterm_pct is None or finals_pct is None:
             return None, None, "Incomplete"
-
-        overall_pct = round((midterm_pct * 0.40) + (finals_pct * 0.60), 2)
-        grade_point, remarks = self.get_grade_point(overall_pct)
-        return overall_pct, grade_point, remarks
+        overall = (
+            Decimal(str(midterm_pct)) * Decimal("0.40")
+            + Decimal(str(finals_pct)) * Decimal("0.60")
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        grade_point, remarks = self.get_grade_point(overall)
+        return float(overall), grade_point, remarks

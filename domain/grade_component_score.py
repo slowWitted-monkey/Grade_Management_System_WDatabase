@@ -1,13 +1,14 @@
 from dataclasses import dataclass
-from typing import Optional
 from datetime import date
+from typing import Optional
+
 
 @dataclass
 class GradeComponentScore:
-    score_id: str
+    score_id: Optional[int]
     score: float
-    grade_id: str
-    component_id: str
-    max_score: float = 100.0
+    enrollment_id: int
+    component_id: int
+    max_score: Optional[float] = None
     remarks: Optional[str] = None
     date_recorded: Optional[date] = None
