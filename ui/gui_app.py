@@ -1,5 +1,6 @@
-"""Modern dark dashboard for the student information and grading system."""
+"""Modern dashboard for the student information and grading system."""
 
+from datetime import date
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -425,6 +426,55 @@ class GradeManagementGUI(ctk.CTk):
         except Exception:
             return []
 
+    @staticmethod
+    def _current_school_year(today=None):
+        """Return the academic year suggested by today's local date (June rollover)."""
+        today = today or date.today()
+        start_year = today.year if today.month >= 6 else today.year - 1
+        return f"{start_year}-{start_year + 1}"
+
+    @staticmethod
+    def _current_semester(today=None):
+        """Suggest a term from the current month; the user can still choose another."""
+        month = (today or date.today()).month
+        if month >= 8:
+            return "1st"
+        if month >= 6:
+            return "Summer"
+        return "2nd"
+
+    def _school_year_options(self):
+        current_start = int(self._current_school_year().split("-", 1)[0])
+        values = {f"{year}-{year + 1}" for year in range(current_start - 10, current_start + 6)}
+        # Preserve older or custom academic-year values already stored in this database.
+        try:
+            rows = self._query("""SELECT school_year FROM class_offering
+                UNION SELECT school_year FROM grading_period""")
+            values.update(str(row[0]) for row in rows if row[0])
+        except Exception:
+            pass
+
+        def sort_key(value):
+            try:
+                return (0, int(value.split("-", 1)[0]), value)
+            except (TypeError, ValueError):
+                return (1, 0, value.casefold())
+
+        return [(value, value) for value in sorted(values, key=sort_key)]
+
+    def _semester_options(self):
+        values = {"1st", "2nd", "Summer"}
+        try:
+            rows = self._query("""SELECT semester FROM class_offering
+                UNION SELECT semester FROM grading_period""")
+            values.update(str(row[0]) for row in rows if row[0])
+        except Exception:
+            pass
+        labels = {"1st": "1st Semester", "2nd": "2nd Semester", "Summer": "Summer"}
+        order = {"1st": 0, "2nd": 1, "Summer": 2}
+        return [(value, labels.get(value, value))
+                for value in sorted(values, key=lambda item: (order.get(item, 3), item.casefold()))]
+
     def _choice_definitions(self, table):
         """Map form fields to database choices or fixed, validated options."""
         foreign_keys = {
@@ -448,8 +498,9 @@ class GradeManagementGUI(ctk.CTk):
             definitions["status"] = [("Enrolled", "Enrolled"), ("Dropped", "Dropped"), ("Completed", "Completed")]
         elif table == "grade_component":
             definitions["type"] = [(value, value) for value in ("Quiz", "Assignment", "Laboratory", "Project", "Exam", "Other")]
-        elif table == "class_offering":
-            definitions["semester"] = [("1st", "1st Semester"), ("2nd", "2nd Semester"), ("Summer", "Summer")]
+        elif table in {"class_offering", "grading_period"}:
+            definitions["school_year"] = self._school_year_options()
+            definitions["semester"] = self._semester_options()
         if table == "student":
             definitions["year_level"] = [(str(n), f"{n} — {n}{'st' if n == 1 else 'nd' if n == 2 else 'rd' if n == 3 else 'th'} year") for n in range(1, 9)]
         return definitions
@@ -552,12 +603,20 @@ class GradeManagementGUI(ctk.CTk):
             "student": {"status": "Active"},
             "teacher": {"status": "Active"},
             "enrollment": {"status": "Enrolled"},
+            "class_offering": {
+                "school_year": self._current_school_year(),
+                "semester": self._current_semester(),
+            },
+            "grading_period": {
+                "school_year": self._current_school_year(),
+                "semester": self._current_semester(),
+            },
         }.get(table, {})
         for index, field in enumerate(fields):
             row, col = divmod(index, column_count)
             cell = ctk.CTkFrame(grid, fg_color="transparent")
             cell.grid(row=row, column=col, sticky="ew", padx=5, pady=5)
-            label = field.replace("_", " ").title()
+            label = "School Year (YYYY-YYYY)" if field == "school_year" else field.replace("_", " ").title()
             if field == key and field in auto_keys:
                 label += "  /  AUTO"
             ctk.CTkLabel(cell, text=label, text_color=self.MUTED,
