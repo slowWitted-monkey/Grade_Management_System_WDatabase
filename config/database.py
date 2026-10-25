@@ -24,4 +24,6 @@ def get_db_connection():
         database=os.getenv("DB_NAME", "Almodiente_CSPC103"),
         user=os.getenv("DB_USER", "postgres"),
         password=password,
+        connect_timeout=max(1, int(os.getenv("DB_CONNECT_TIMEOUT", "5"))),
     )
+
