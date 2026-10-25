@@ -7,14 +7,14 @@ from config.database import get_db_connection
 
 class GradeRepository:
     @staticmethod
-    def _audit(cursor, table, record_id, action, old_value, new_value, changed_by="tester"):
+    def _audit(cursor, table, record_id, action, old_value, new_value, changed_by="Application"):
         cursor.execute("""INSERT INTO audit_log
             (table_name, record_id, action, old_value, new_value, changed_by)
             VALUES (%s,%s,%s,%s,%s,%s)""",
             (table, str(record_id), action, str(old_value) if old_value is not None else None,
              str(new_value) if new_value is not None else None, changed_by))
 
-    def log_audit_event(self, table_name, record_id, action, old_val, new_val, changed_by="tester"):
+    def log_audit_event(self, table_name, record_id, action, old_val, new_val, changed_by="Application"):
         conn = get_db_connection()
         try:
             with conn.cursor() as cursor:
@@ -27,7 +27,7 @@ class GradeRepository:
             conn.close()
 
     def save_component_score(self, enrollment_id, period_id, component_id, score,
-                             changed_by="tester", remarks=None):
+                             changed_by="Application", remarks=None):
         score = Decimal(str(score))
         conn = get_db_connection()
         try:
@@ -64,7 +64,7 @@ class GradeRepository:
         finally:
             conn.close()
 
-    def delete_component_score(self, enrollment_id, period_id, component_id, changed_by="tester"):
+    def delete_component_score(self, enrollment_id, period_id, component_id, changed_by="Application"):
         conn = get_db_connection()
         try:
             with conn.cursor() as cursor:
@@ -146,11 +146,32 @@ class GradeRepository:
         finally:
             conn.close()
 
-    def get_all_audit_logs(self):
+    def get_all_audit_logs(self, *, limit=1000, table_name=None, action=None, search=None):
+        if not 1 <= int(limit) <= 5000:
+            raise ValueError("Audit log limit must be between 1 and 5000 entries.")
+        clauses = []
+        params = []
+        if table_name:
+            clauses.append("table_name=%s")
+            params.append(table_name)
+        if action:
+            clauses.append("action=%s")
+            params.append(action)
+        if search:
+            clauses.append("(record_id ILIKE %s OR changed_by ILIKE %s OR "
+                           "COALESCE(old_value, '') ILIKE %s OR COALESCE(new_value, '') ILIKE %s)")
+            pattern = f"%{search}%"
+            params.extend((pattern, pattern, pattern, pattern))
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        params.append(int(limit))
         conn = get_db_connection()
         try:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT log_id, table_name, record_id, action, old_value, new_value, changed_by, changed_at FROM audit_log ORDER BY changed_at DESC, log_id DESC")
+                cursor.execute(
+                    "SELECT log_id, table_name, record_id, action, old_value, new_value, changed_by, changed_at "
+                    "FROM audit_log" + where + " ORDER BY changed_at DESC, log_id DESC LIMIT %s",
+                    tuple(params),
+                )
                 return cursor.fetchall()
         finally:
             conn.close()
