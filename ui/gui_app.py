@@ -14,18 +14,19 @@ from service.report_service import ReportService
 class GradeManagementGUI(ctk.CTk):
     """A dark, developer-inspired desktop UI backed by the existing services."""
 
-    BG = "#0b1020"
-    PANEL = "#111a2e"
-    CARD = "#151f35"
-    CARD_HOVER = "#1b2944"
-    BORDER = "#263550"
-    TEXT = "#e7eefc"
-    MUTED = "#8da0bf"
-    BLUE = "#4f8cff"
-    CYAN = "#39d6d0"
-    GREEN = "#32d296"
-    AMBER = "#f3b94f"
-    RED = "#fa7185"
+    BG = "#f5f7fb"
+    PANEL = "#edf2f8"
+    CARD = "#ffffff"
+    CARD_HOVER = "#e8f0fe"
+    INPUT = "#ffffff"
+    BORDER = "#d2dce9"
+    TEXT = "#17263c"
+    MUTED = "#52647b"
+    BLUE = "#2563eb"
+    CYAN = "#0f766e"
+    GREEN = "#16845b"
+    AMBER = "#a15c07"
+    RED = "#bd3445"
 
     TABLES = {
         "Students": ("student", "student_id", ["student_id", "first_name", "last_name", "program", "year_level", "email", "status"]),
@@ -52,7 +53,7 @@ class GradeManagementGUI(ctk.CTk):
     ]
 
     def __init__(self):
-        ctk.set_appearance_mode("dark")
+        ctk.set_appearance_mode("light")
         ctk.set_default_color_theme("blue")
         super().__init__()
         self.title("Grade Management System  |  Academic Workspace")
@@ -81,13 +82,13 @@ class GradeManagementGUI(ctk.CTk):
             style.theme_use("clam")
         except tk.TclError:
             pass
-        style.configure("Treeview", background=self.PANEL, fieldbackground=self.PANEL,
-                        foreground=self.TEXT, rowheight=34, borderwidth=0,
+        style.configure("Treeview", background=self.CARD, fieldbackground=self.CARD,
+                        foreground=self.TEXT, rowheight=38, borderwidth=0,
                         font=("Segoe UI", 10))
-        style.configure("Treeview.Heading", background=self.CARD, foreground=self.MUTED,
+        style.configure("Treeview.Heading", background=self.PANEL, foreground=self.TEXT,
                         relief="flat", borderwidth=0, font=("Segoe UI Semibold", 9))
-        style.map("Treeview", background=[("selected", "#254b7e")],
-                  foreground=[("selected", "#ffffff")])
+        style.map("Treeview", background=[("selected", "#dbeafe")],
+                  foreground=[("selected", self.TEXT)])
         style.map("Treeview.Heading", background=[("active", self.CARD_HOVER)])
 
     def _build_sidebar(self):
@@ -112,7 +113,7 @@ class GradeManagementGUI(ctk.CTk):
         ctk.CTkLabel(brand_text, text="ACADEMIC WORKSPACE", text_color=self.MUTED,
                      font=ctk.CTkFont(size=9, weight="bold")).pack(anchor="w")
 
-        ctk.CTkLabel(side, text="WORKSPACE", text_color="#607390",
+        ctk.CTkLabel(side, text="WORKSPACE", text_color=self.MUTED,
                      font=ctk.CTkFont(family="Consolas", size=10, weight="bold"))\
             .pack(anchor="w", padx=22, pady=(0, 9))
         nav = ctk.CTkScrollableFrame(side, fg_color="transparent", corner_radius=0,
@@ -186,10 +187,10 @@ class GradeManagementGUI(ctk.CTk):
     def _highlight_nav(self, key):
         for item, button in self.nav_buttons.items():
             active = item == key
-            button.configure(fg_color="#1b3152" if active else "transparent",
+            button.configure(fg_color="#dce9fb" if active else "transparent",
                              text_color=self.CYAN if active else self.MUTED,
                              border_width=1 if active else 0,
-                             border_color="#2f5b92")
+                             border_color="#9bbcf4")
 
     def _set_page(self, title, nav_key):
         self._page_generation += 1
@@ -404,7 +405,7 @@ class GradeManagementGUI(ctk.CTk):
         values = [placeholder] + list(label_to_value)
         combo = ctk.CTkComboBox(
             parent, values=values, state="normal" if editable else "readonly", height=height,
-            width=width or 220, fg_color="#0e1729", border_color=self.BORDER,
+            width=width or 220, fg_color=self.INPUT, border_color=self.BORDER,
             button_color=self.BLUE, dropdown_fg_color=self.PANEL,
         )
         label_to_value[placeholder] = None
@@ -512,7 +513,7 @@ class GradeManagementGUI(ctk.CTk):
                     editable=field in editable_choices)
             else:
                 entry = ctk.CTkEntry(cell, height=35, corner_radius=8,
-                                     fg_color="#0e1729", border_color=self.BORDER,
+                                     fg_color=self.INPUT, border_color=self.BORDER,
                                      text_color=self.TEXT, placeholder_text="Enter " + field.replace("_", " "))
             entry.pack(fill="x")
             if field in field_defaults and field not in choice_maps:
@@ -526,7 +527,7 @@ class GradeManagementGUI(ctk.CTk):
         search_row = ctk.CTkFrame(tree_card, fg_color="transparent")
         search_row.pack(fill="x", padx=12, pady=(6, 4))
         search_entry = ctk.CTkEntry(
-            search_row, width=300, height=34, fg_color="#0e1729",
+            search_row, width=300, height=34, fg_color=self.INPUT,
             border_color=self.BORDER, placeholder_text=f"Search {title.lower()}...",
         )
         search_entry.pack(side="left", padx=(0, 7))
@@ -668,7 +669,7 @@ class GradeManagementGUI(ctk.CTk):
         self._button(controls, "＋  Add record", add, self.BLUE).pack(side="left", padx=(0, 7))
         self._button(controls, "↻  Refresh", refresh, self.CARD_HOVER).pack(side="left", padx=4)
         self._button(controls, "Update selected", update, self.CARD_HOVER).pack(side="left", padx=4)
-        self._button(controls, "Delete selected", delete, "#432638", self.RED).pack(side="left", padx=4)
+        self._button(controls, "Delete selected", delete, "#fce8eb", self.RED).pack(side="left", padx=4)
         self._button(controls, "Clear form", clear, self.CARD_HOVER).pack(side="right")
         self._button(search_row, "Search", search_records, self.BLUE).pack(side="left", padx=(0, 6))
         self._button(search_row, "Clear search", clear_search, self.CARD_HOVER).pack(side="left")
@@ -677,11 +678,19 @@ class GradeManagementGUI(ctk.CTk):
         self._after_page(100, lambda: self._guard(refresh))
 
     def _button(self, parent, text, command, color=None, text_color=None):
+        background = color or self.BLUE
+        if background == self.BLUE:
+            hover = "#1d4ed8"
+        elif background in {self.GREEN, self.CYAN}:
+            hover = "#0b5f58"
+        else:
+            hover = self.CARD_HOVER if background == self.CARD_HOVER else self.BORDER
+        foreground = text_color or ("#ffffff" if background in {self.BLUE, self.GREEN, self.CYAN} else self.TEXT)
         return ctk.CTkButton(parent, text=text, command=lambda: self._guard(command),
                              height=34, corner_radius=8,
-                             fg_color=color or self.BLUE,
-                             hover_color=self.CARD_HOVER if color == self.BLUE else self.BORDER,
-                             text_color=text_color or self.TEXT,
+                             fg_color=background,
+                             hover_color=hover,
+                             text_color=foreground,
                              font=ctk.CTkFont(size=10, weight="bold"))
 
     def show_crud_page(self, title):
@@ -751,7 +760,7 @@ class GradeManagementGUI(ctk.CTk):
                     valid = abs(total - 100.0) < 0.005
                     period_totals[period_id].configure(
                         text=f"Total  {total:.2f}%  ·  {'Ready to save' if valid else 'Must equal 100%'}",
-                        text_color=self.GREEN if valid else self.MUTED)
+                        text_color=self.GREEN if valid else self.AMBER)
                 except ValueError:
                     period_totals[period_id].configure(
                         text="Total  Check the entered numbers", text_color=self.RED)
@@ -775,7 +784,7 @@ class GradeManagementGUI(ctk.CTk):
                     ctk.CTkLabel(body, text=name, text_color=self.TEXT, anchor="w")\
                         .grid(row=row_index, column=0, sticky="ew", padx=4, pady=4)
                     entry = ctk.CTkEntry(body, width=112, height=32,
-                                         fg_color="#0e1729", border_color=self.BORDER)
+                                         fg_color=self.INPUT, border_color=self.BORDER)
                     entry.insert(0, str(pct))
                     entry.grid(row=row_index, column=1, sticky="e", padx=4, pady=3)
                     entries[cid] = entry
@@ -797,7 +806,7 @@ class GradeManagementGUI(ctk.CTk):
 
         self._button(row, "Load components", load, self.BLUE).grid(
             row=0, column=2, padx=(0, 8))
-        self._button(row, "Save weights", save, self.GREEN, "#071a16").grid(
+        self._button(row, "Save weights", save, self.GREEN, "#ffffff").grid(
             row=0, column=3)
 
     def show_scores_page(self):
@@ -826,7 +835,7 @@ class GradeManagementGUI(ctk.CTk):
                 entry, score_choice_maps[field] = self._make_combo(
                     form, self._reference_options("component"), height=38)
             else:
-                entry = ctk.CTkEntry(form, height=38, fg_color="#0e1729", border_color=self.BORDER,
+                entry = ctk.CTkEntry(form, height=38, fg_color=self.INPUT, border_color=self.BORDER,
                                      placeholder_text="Enter " + label.lower())
             entry.grid(row=1, column=col, sticky="ew", padx=6)
             entries[field] = entry
@@ -844,9 +853,8 @@ class GradeManagementGUI(ctk.CTk):
             rows = self._query("SELECT period_id FROM grade_component WHERE component_id=%s", (component,))
             if not rows:
                 raise ValueError("Component ID was not found.")
-            self.grade_repo.save_component_score(enrollment, rows[0][0], component, score)
-            self._query("UPDATE grade_component_score SET remarks=%s WHERE enrollment_id=%s AND component_id=%s",
-                        (remarks or None, enrollment, component), fetch=False)
+            self.grade_repo.save_component_score(
+                enrollment, rows[0][0], component, score, remarks=remarks or None)
             reload_saved_scores()
             messagebox.showinfo("Score saved", "The student score has been saved.", parent=self)
 
@@ -868,7 +876,7 @@ class GradeManagementGUI(ctk.CTk):
         buttons = ctk.CTkFrame(card, fg_color="transparent")
         buttons.pack(anchor="w", padx=16, pady=(0, 16))
         self._button(buttons, "Save score", save, self.BLUE).pack(side="left", padx=5)
-        self._button(buttons, "Delete score", delete, "#432638", self.RED).pack(side="left", padx=5)
+        self._button(buttons, "Delete score", delete, "#fce8eb", self.RED).pack(side="left", padx=5)
 
         saved_card = self._card(page, "SAVED SCORES  /  RELOAD BY CLASS")
         saved_card.pack(fill="both", expand=True, pady=(12, 0))
@@ -988,13 +996,13 @@ class GradeManagementGUI(ctk.CTk):
         ctk.CTkLabel(report_row, text="Choose a class or student", text_color=self.MUTED,
                      font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=1, sticky="w", padx=5, pady=(0, 4))
         kind = ctk.CTkComboBox(report_row, values=["Class list", "Grade sheet", "Student grade report"],
-                               width=220, height=36, fg_color="#0e1729", border_color=self.BORDER,
+                               width=220, height=36, fg_color=self.INPUT, border_color=self.BORDER,
                                button_color=self.BLUE, dropdown_fg_color=self.PANEL)
         kind.set("Class list")
         kind.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 4))
         report_id = ctk.CTkComboBox(
             report_row, values=["Choose a record"], state="readonly", height=36,
-            fg_color="#0e1729", border_color=self.BORDER,
+            fg_color=self.INPUT, border_color=self.BORDER,
             button_color=self.BLUE, dropdown_fg_color=self.PANEL,
         )
         report_id.set("Choose a record")
@@ -1020,12 +1028,12 @@ class GradeManagementGUI(ctk.CTk):
                                      text_color=self.MUTED, justify="left", anchor="w",
                                      font=ctk.CTkFont(size=13, weight="bold"), wraplength=1200)
         report_header.pack(fill="x", padx=16, pady=(4, 10))
-        table_wrap = ctk.CTkFrame(output_card, fg_color="#0e1729", corner_radius=9,
+        table_wrap = ctk.CTkFrame(output_card, fg_color=self.INPUT, corner_radius=9,
                                   border_width=1, border_color=self.BORDER)
         table_wrap.pack(fill="both", expand=True, padx=12, pady=(0, 8))
         ttk.Style(self).configure("Report.Treeview", rowheight=42,
-                                  font=("Segoe UI", 12), background=self.PANEL,
-                                  fieldbackground=self.PANEL, foreground=self.TEXT)
+                                  font=("Segoe UI", 12), background=self.CARD,
+                                  fieldbackground=self.CARD, foreground=self.TEXT)
         report_table = ttk.Treeview(table_wrap, columns=(), show="headings", height=12,
                                     style="Report.Treeview")
         report_table.pack(side="top", fill="both", expand=True, padx=5, pady=(5, 0))
@@ -1043,7 +1051,7 @@ class GradeManagementGUI(ctk.CTk):
             record_id = report_choices.get(report_id.get())
             self._render_report(kind.get(), record_id, report_header, report_table, report_summary)
 
-        self._button(report_row, "Show report", display_report, self.CYAN, "#081a1d")\
+        self._button(report_row, "Show report", display_report, self.CYAN, "#ffffff")\
             .grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=(5, 4))
         self.content.grid_rowconfigure(0, weight=1)
 
@@ -1052,7 +1060,7 @@ class GradeManagementGUI(ctk.CTk):
         box.pack(side="left", padx=5, pady=3)
         ctk.CTkLabel(box, text=label, text_color=self.MUTED,
                      font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", pady=(0, 4))
-        entry = ctk.CTkEntry(box, width=width, height=36, fg_color="#0e1729", border_color=self.BORDER)
+        entry = ctk.CTkEntry(box, width=width, height=36, fg_color=self.INPUT, border_color=self.BORDER)
         entry.pack()
         return entry
 
