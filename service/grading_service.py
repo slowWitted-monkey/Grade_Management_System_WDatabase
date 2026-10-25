@@ -24,6 +24,13 @@ class GradingService:
                 if not class_row:
                     raise ValueError(f"Class offering '{class_id}' was not found.")
                 class_id = class_row[0]
+                cursor.execute("SELECT class_id FROM enrollment WHERE enrollment_id=%s",
+                               (enrollment_id,))
+                enrollment_row = cursor.fetchone()
+                if not enrollment_row:
+                    raise ValueError(f"Enrollment '{enrollment_id}' was not found.")
+                if enrollment_row[0] != class_id:
+                    raise ValueError("The selected enrollment does not belong to the selected class.")
                 cursor.execute("SELECT school_year, semester FROM class_offering WHERE class_id=%s", (class_id,))
                 school_year, semester = cursor.fetchone()
                 cursor.execute("""SELECT period_id, name FROM grading_period
@@ -60,3 +67,4 @@ class GradingService:
 
     def update_grading_weights(self, class_id: str, component_weights: dict):
         self.grade_repo.update_period_weights(class_id, component_weights)
+
