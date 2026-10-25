@@ -14,19 +14,19 @@ from service.report_service import ReportService
 class GradeManagementGUI(ctk.CTk):
     """A dark, developer-inspired desktop UI backed by the existing services."""
 
-    BG = "#f5f7fb"
-    PANEL = "#edf2f8"
-    CARD = "#ffffff"
-    CARD_HOVER = "#e8f0fe"
-    INPUT = "#ffffff"
-    BORDER = "#d2dce9"
-    TEXT = "#17263c"
-    MUTED = "#52647b"
-    BLUE = "#2563eb"
-    CYAN = "#0f766e"
-    GREEN = "#16845b"
-    AMBER = "#a15c07"
-    RED = "#bd3445"
+    BG = "#e9edf2"
+    PANEL = "#e1e7ee"
+    CARD = "#f2f4f7"
+    CARD_HOVER = "#dce6f1"
+    INPUT = "#f8fafc"
+    BORDER = "#c3cdd9"
+    TEXT = "#203047"
+    MUTED = "#526276"
+    BLUE = "#3769b1"
+    CYAN = "#287a76"
+    GREEN = "#327454"
+    AMBER = "#93651f"
+    RED = "#a64853"
 
     TABLES = {
         "Students": ("student", "student_id", ["student_id", "first_name", "last_name", "program", "year_level", "email", "status"]),
@@ -50,6 +50,7 @@ class GradeManagementGUI(ctk.CTk):
         ("Grade Weights", "weights"),
         ("Score Entry", "scores"),
         ("Compute & Reports", "reports"),
+        ("Audit Log", "audit"),
     ]
 
     def __init__(self):
@@ -183,14 +184,16 @@ class GradeManagementGUI(ctk.CTk):
             self.show_scores_page()
         elif target == "reports":
             self.show_reports_page()
+        elif target == "audit":
+            self.show_audit_page()
 
     def _highlight_nav(self, key):
         for item, button in self.nav_buttons.items():
             active = item == key
-            button.configure(fg_color="#dce9fb" if active else "transparent",
+            button.configure(fg_color="#d5e2f2" if active else "transparent",
                              text_color=self.CYAN if active else self.MUTED,
                              border_width=1 if active else 0,
-                             border_color="#9bbcf4")
+                             border_color="#9bb4d5")
 
     def _set_page(self, title, nav_key):
         self._page_generation += 1
@@ -311,6 +314,59 @@ class GradeManagementGUI(ctk.CTk):
                 result = cur.fetchall() if fetch else None
             conn.commit()
             return result
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _mutate_with_audit(self, table, key, fields, action, *, data=None, record_id=None):
+        """Apply a CRUD action and write its audit entry in the same transaction."""
+        conn = self._db()
+        try:
+            with conn.cursor() as cursor:
+                if action == "INSERT":
+                    data = data or {}
+                    columns = list(data)
+                    if not columns:
+                        raise ValueError("Enter at least one value before adding a record.")
+                    placeholders = ", ".join(["%s"] * len(columns))
+                    cursor.execute(
+                        f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders}) "
+                        f"RETURNING {key}",
+                        tuple(data[column] for column in columns),
+                    )
+                    record_id = cursor.fetchone()[0]
+                    old_value, new_value = None, data
+                else:
+                    cursor.execute(
+                        f"SELECT {', '.join(fields)} FROM {table} WHERE {key}=%s FOR UPDATE",
+                        (record_id,),
+                    )
+                    row = cursor.fetchone()
+                    if row is None:
+                        raise ValueError("The selected record no longer exists. Refresh the list and try again.")
+                    old_value = dict(zip(fields, row))
+                    if action == "UPDATE":
+                        data = data or {}
+                        if not data:
+                            raise ValueError("There are no fields to update.")
+                        assignments = ", ".join(f"{column}=%s" for column in data)
+                        cursor.execute(
+                            f"UPDATE {table} SET {assignments} WHERE {key}=%s",
+                            tuple(data.values()) + (record_id,),
+                        )
+                        new_value = {**old_value, **data}
+                    elif action == "DELETE":
+                        cursor.execute(f"DELETE FROM {table} WHERE {key}=%s", (record_id,))
+                        new_value = None
+                    else:
+                        raise ValueError(f"Unsupported record action: {action}")
+
+                self.grade_repo._audit(
+                    cursor, table.upper(), record_id, action, old_value, new_value, "Application")
+            conn.commit()
+            return record_id
         except Exception:
             conn.rollback()
             raise
@@ -634,10 +690,7 @@ class GradeManagementGUI(ctk.CTk):
             if missing:
                 noun = "field" if len(missing) == 1 else "fields"
                 raise ValueError(f"Complete these required {noun}: " + ", ".join(missing) + ".")
-            names = list(data)
-            marks = ", ".join(["%s"] * len(names))
-            self._query(f"INSERT INTO {table} ({', '.join(names)}) VALUES ({marks})",
-                        tuple(data[name] for name in names), fetch=False)
+            self._mutate_with_audit(table, key, fields, "INSERT", data=data)
             refresh()
             clear()
             messagebox.showinfo("Record added", f"The {title.lower()} record was added successfully.", parent=self)
@@ -649,9 +702,8 @@ class GradeManagementGUI(ctk.CTk):
             data.pop(key, None)
             if not data:
                 raise ValueError("There are no fields to update.")
-            assignments = ", ".join(f"{name}=%s" for name in data)
-            self._query(f"UPDATE {table} SET {assignments} WHERE {key}=%s",
-                        tuple(data.values()) + (state["selected"],), fetch=False)
+            self._mutate_with_audit(
+                table, key, fields, "UPDATE", data=data, record_id=state["selected"])
             refresh()
             clear()
             messagebox.showinfo("Changes saved", f"The {title.lower()} record was updated successfully.", parent=self)
@@ -661,7 +713,8 @@ class GradeManagementGUI(ctk.CTk):
                 raise ValueError("Select a row in the table before deleting it.")
             if not messagebox.askyesno("Confirm deletion", "Delete the selected record?", parent=self):
                 return
-            self._query(f"DELETE FROM {table} WHERE {key}=%s", (state["selected"],), fetch=False)
+            self._mutate_with_audit(
+                table, key, fields, "DELETE", record_id=state["selected"])
             refresh()
             clear()
             messagebox.showinfo("Record deleted", f"The {title.lower()} record was deleted.", parent=self)
@@ -1053,6 +1106,127 @@ class GradeManagementGUI(ctk.CTk):
 
         self._button(report_row, "Show report", display_report, self.CYAN, "#ffffff")\
             .grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=(5, 4))
+        self.content.grid_rowconfigure(0, weight=1)
+
+    def show_audit_page(self):
+        self._set_page("Audit Log", "audit")
+        page = ctk.CTkFrame(self.content, fg_color="transparent")
+        page.grid(row=0, column=0, sticky="nsew")
+        page.grid_columnconfigure(0, weight=1)
+        self._section_intro(
+            page, "Review database activity",
+            "Search recent changes made in this application. New records include before-and-after values.")
+
+        filters = self._card(page, "FILTER AUDIT HISTORY")
+        filters.pack(fill="x", pady=(0, 10))
+        filter_row = ctk.CTkFrame(filters, fg_color="transparent")
+        filter_row.pack(fill="x", padx=12, pady=(6, 12))
+        filter_row.grid_columnconfigure(0, weight=1)
+        search_entry = ctk.CTkEntry(
+            filter_row, height=36, fg_color=self.INPUT, border_color=self.BORDER,
+            placeholder_text="Search IDs, user, old or new values…")
+        search_entry.grid(row=0, column=0, sticky="ew", padx=(4, 8))
+        table_filter = ctk.CTkComboBox(
+            filter_row,
+            values=["All tables", "STUDENT", "TEACHER", "SUBJECT", "CLASS_OFFERING",
+                    "ENROLLMENT", "GRADING_PERIOD", "GRADE_COMPONENT", "GRADE_PERCENTAGE",
+                    "GRADE_COMPONENT_SCORE", "GRADE"],
+            state="readonly", width=205, height=36, fg_color=self.INPUT,
+            border_color=self.BORDER, button_color=self.BLUE, dropdown_fg_color=self.CARD)
+        table_filter.set("All tables")
+        table_filter.grid(row=0, column=1, padx=5)
+        action_filter = ctk.CTkComboBox(
+            filter_row, values=["All actions", "INSERT", "UPDATE", "DELETE"],
+            state="readonly", width=145, height=36, fg_color=self.INPUT,
+            border_color=self.BORDER, button_color=self.BLUE, dropdown_fg_color=self.CARD)
+        action_filter.set("All actions")
+        action_filter.grid(row=0, column=2, padx=5)
+
+        log_card = self._card(page, "RECENT ACTIVITY")
+        log_card.pack(fill="both", expand=True, pady=(0, 10))
+        ctk.CTkLabel(log_card, text="Showing up to 1,000 newest matching entries. Select a row to inspect its values.",
+                     text_color=self.MUTED, font=ctk.CTkFont(size=10))\
+            .pack(anchor="w", padx=15, pady=(0, 7))
+        tree_wrap = ctk.CTkFrame(log_card, fg_color=self.INPUT, corner_radius=9,
+                                 border_width=1, border_color=self.BORDER)
+        tree_wrap.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+        columns = ("log_id", "changed_at", "table_name", "record_id", "action",
+                   "changed_by", "old_value", "new_value")
+        visible = ("changed_at", "table_name", "record_id", "action", "changed_by")
+        tree = ttk.Treeview(tree_wrap, columns=columns, displaycolumns=visible,
+                            show="headings", height=10)
+        headings = {
+            "changed_at": ("Date and time", 180),
+            "table_name": ("Record type", 180),
+            "record_id": ("Record ID", 130),
+            "action": ("Action", 100),
+            "changed_by": ("Changed by", 150),
+        }
+        for column, (label, width) in headings.items():
+            tree.heading(column, text=label)
+            tree.column(column, width=width, minwidth=90,
+                        anchor="center" if column == "action" else "w",
+                        stretch=column in {"table_name", "changed_by"})
+        tree.pack(side="left", fill="both", expand=True, padx=(5, 0), pady=5)
+        ybar = ttk.Scrollbar(tree_wrap, orient="vertical", command=tree.yview)
+        ybar.pack(side="right", fill="y", padx=(0, 5), pady=5)
+        tree.configure(yscrollcommand=ybar.set)
+
+        details = self._card(page, "SELECTED ENTRY DETAILS")
+        details.pack(fill="x")
+        detail_grid = ctk.CTkFrame(details, fg_color="transparent")
+        detail_grid.pack(fill="x", padx=12, pady=(4, 12))
+        detail_grid.grid_columnconfigure(0, weight=1, uniform="audit_detail")
+        detail_grid.grid_columnconfigure(1, weight=1, uniform="audit_detail")
+        old_box = ctk.CTkTextbox(detail_grid, height=78, wrap="word", fg_color=self.INPUT,
+                                 border_color=self.BORDER, text_color=self.TEXT)
+        new_box = ctk.CTkTextbox(detail_grid, height=78, wrap="word", fg_color=self.INPUT,
+                                 border_color=self.BORDER, text_color=self.TEXT)
+        for column, label, box in ((0, "Before", old_box), (1, "After", new_box)):
+            ctk.CTkLabel(detail_grid, text=label, text_color=self.MUTED,
+                         font=ctk.CTkFont(size=10, weight="bold"))\
+                .grid(row=0, column=column, sticky="w", padx=5, pady=(0, 4))
+            box.grid(row=1, column=column, sticky="ew", padx=5)
+
+        def set_detail(box, value):
+            box.configure(state="normal")
+            box.delete("1.0", "end")
+            box.insert("1.0", "—" if value is None else str(value))
+            box.configure(state="disabled")
+
+        set_detail(old_box, "Select an entry to view its previous values.")
+        set_detail(new_box, "Select an entry to view its updated values.")
+
+        def select_entry(_event=None):
+            selected = tree.focus()
+            if not selected:
+                return
+            values = tree.item(selected, "values")
+            set_detail(old_box, values[6])
+            set_detail(new_box, values[7])
+
+        def refresh():
+            table_name = table_filter.get()
+            action = action_filter.get()
+            rows = self.grade_repo.get_all_audit_logs(
+                limit=1000,
+                table_name=None if table_name == "All tables" else table_name,
+                action=None if action == "All actions" else action,
+                search=search_entry.get().strip() or None,
+            )
+            tree.delete(*tree.get_children())
+            for log_id, table_name, record_id, action, old_value, new_value, changed_by, changed_at in rows:
+                tree.insert("", "end", values=(log_id, changed_at, table_name, record_id,
+                                                 action, changed_by, old_value, new_value))
+            if not rows:
+                set_detail(old_box, "No matching activity was found.")
+                set_detail(new_box, "Adjust the filters or make a change in the application.")
+
+        self._button(filter_row, "Search", refresh, self.BLUE).grid(row=0, column=3, padx=5)
+        self._button(filter_row, "↻  Refresh", refresh, self.CARD_HOVER).grid(row=0, column=4, padx=(5, 4))
+        search_entry.bind("<Return>", lambda _event: self._guard(refresh))
+        tree.bind("<<TreeviewSelect>>", select_entry)
+        self._after_page(80, lambda: self._guard(refresh))
         self.content.grid_rowconfigure(0, weight=1)
 
     def _small_input(self, parent, label, width):
