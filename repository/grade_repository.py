@@ -26,7 +26,8 @@ class GradeRepository:
         finally:
             conn.close()
 
-    def save_component_score(self, enrollment_id, period_id, component_id, score, changed_by="tester"):
+    def save_component_score(self, enrollment_id, period_id, component_id, score,
+                             changed_by="tester", remarks=None):
         score = Decimal(str(score))
         conn = get_db_connection()
         try:
@@ -44,15 +45,17 @@ class GradeRepository:
                 cursor.execute("SELECT percentage FROM grade_percentage WHERE class_id=%s AND component_id=%s", (class_id, component_id))
                 if not cursor.fetchone():
                     raise ValueError("Configure this component's class weight before entering scores.")
-                cursor.execute("SELECT score_id, score FROM grade_component_score WHERE enrollment_id=%s AND component_id=%s", (enrollment_id, component_id))
+                cursor.execute("SELECT score_id, score, remarks FROM grade_component_score WHERE enrollment_id=%s AND component_id=%s", (enrollment_id, component_id))
                 old = cursor.fetchone()
-                cursor.execute("""INSERT INTO grade_component_score (enrollment_id, component_id, score)
-                    VALUES (%s,%s,%s) ON CONFLICT (enrollment_id, component_id)
-                    DO UPDATE SET score=EXCLUDED.score, date_recorded=CURRENT_DATE
-                    RETURNING score_id""", (enrollment_id, component_id, score))
+                cursor.execute("""INSERT INTO grade_component_score
+                    (enrollment_id, component_id, score, remarks)
+                    VALUES (%s,%s,%s,%s) ON CONFLICT (enrollment_id, component_id)
+                    DO UPDATE SET score=EXCLUDED.score, remarks=EXCLUDED.remarks,
+                    date_recorded=CURRENT_DATE
+                    RETURNING score_id""", (enrollment_id, component_id, score, remarks))
                 score_id = cursor.fetchone()[0]
                 self._audit(cursor, "GRADE_COMPONENT_SCORE", score_id, "UPDATE" if old else "INSERT",
-                            old[1] if old else None, score, changed_by)
+                            (old[1], old[2]) if old else None, (score, remarks), changed_by)
             conn.commit()
             return score_id
         except Exception:
@@ -67,10 +70,11 @@ class GradeRepository:
             with conn.cursor() as cursor:
                 cursor.execute("""DELETE FROM grade_component_score s USING grade_component c
                     WHERE s.component_id=c.component_id AND s.enrollment_id=%s AND s.component_id=%s
-                    AND c.period_id=%s RETURNING s.score_id, s.score""", (enrollment_id, component_id, period_id))
+                    AND c.period_id=%s RETURNING s.score_id, s.score, s.remarks""", (enrollment_id, component_id, period_id))
                 old = cursor.fetchone()
                 if old:
-                    self._audit(cursor, "GRADE_COMPONENT_SCORE", old[0], "DELETE", old[1], None, changed_by)
+                    self._audit(cursor, "GRADE_COMPONENT_SCORE", old[0], "DELETE",
+                                (old[1], old[2]), None, changed_by)
             conn.commit()
             return bool(old)
         except Exception:
@@ -150,3 +154,4 @@ class GradeRepository:
                 return cursor.fetchall()
         finally:
             conn.close()
+
