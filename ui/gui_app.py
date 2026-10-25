@@ -952,17 +952,19 @@ class GradeManagementGUI(ctk.CTk):
 
         tools = ctk.CTkFrame(page, fg_color="transparent")
         tools.pack(fill="x", pady=(0, 12))
+        tools.grid_columnconfigure(0, weight=1, uniform="report_tools")
+        tools.grid_columnconfigure(1, weight=1, uniform="report_tools")
         compute = self._card(tools, "GRADE COMPUTATION")
-        compute.pack(fill="x", pady=(0, 10))
+        compute.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         compute_row = ctk.CTkFrame(compute, fg_color="transparent")
-        compute_row.pack(fill="x", padx=13, pady=(6, 14))
+        compute_row.pack(fill="x", padx=12, pady=(6, 8))
         enrollment, enrollment_choices = self._small_combo(
-            compute_row, "Enrollment", self._reference_options("enrollment"), 240)
+            compute_row, "Enrollment", self._reference_options("enrollment"), 190)
         class_id, class_choices = self._small_combo(
-            compute_row, "Class", self._reference_options("class"), 220)
+            compute_row, "Class", self._reference_options("class"), 180)
         result_label = ctk.CTkLabel(compute, text="Grade results will appear here.",
                                     text_color=self.MUTED, font=ctk.CTkFont(size=11))
-        result_label.pack(anchor="w", padx=18, pady=(0, 13))
+        result_label.pack(anchor="w", padx=17, pady=(0, 10))
 
         def calculate():
             enrollment_value = enrollment_choices.get(enrollment.get())
@@ -977,9 +979,9 @@ class GradeManagementGUI(ctk.CTk):
         self._button(compute_row, "Compute & save", calculate, self.BLUE).pack(side="left", padx=5, pady=20)
 
         report = self._card(tools, "REPORT VIEWER")
-        report.pack(fill="x")
+        report.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         report_row = ctk.CTkFrame(report, fg_color="transparent")
-        report_row.pack(fill="x", padx=13, pady=(6, 8))
+        report_row.pack(fill="x", padx=11, pady=(6, 8))
         report_row.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(report_row, text="Report type", text_color=self.MUTED,
                      font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=0, sticky="w", padx=5, pady=(0, 4))
@@ -1012,16 +1014,20 @@ class GradeManagementGUI(ctk.CTk):
         kind.configure(command=refresh_report_choices)
         refresh_report_choices()
 
-        output_card = self._card(page, "OUTPUT  /  REPORT DETAILS")
+        output_card = self._card(page, "REPORT DISPLAY  /  GRADES AND CLASS LIST")
         output_card.pack(fill="both", expand=True)
         report_header = ctk.CTkLabel(output_card, text="Select a report type and record, then choose Show report.",
                                      text_color=self.MUTED, justify="left", anchor="w",
-                                     font=ctk.CTkFont(size=11), wraplength=1050)
-        report_header.pack(fill="x", padx=16, pady=(4, 8))
+                                     font=ctk.CTkFont(size=13, weight="bold"), wraplength=1200)
+        report_header.pack(fill="x", padx=16, pady=(4, 10))
         table_wrap = ctk.CTkFrame(output_card, fg_color="#0e1729", corner_radius=9,
                                   border_width=1, border_color=self.BORDER)
-        table_wrap.pack(fill="both", expand=True, padx=14, pady=(0, 8))
-        report_table = ttk.Treeview(table_wrap, columns=(), show="headings", height=10)
+        table_wrap.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+        ttk.Style(self).configure("Report.Treeview", rowheight=42,
+                                  font=("Segoe UI", 12), background=self.PANEL,
+                                  fieldbackground=self.PANEL, foreground=self.TEXT)
+        report_table = ttk.Treeview(table_wrap, columns=(), show="headings", height=12,
+                                    style="Report.Treeview")
         report_table.pack(side="top", fill="both", expand=True, padx=5, pady=(5, 0))
         ybar = ttk.Scrollbar(table_wrap, orient="vertical", command=report_table.yview)
         ybar.place(relx=1.0, rely=0, relheight=1.0, anchor="ne")
@@ -1029,7 +1035,7 @@ class GradeManagementGUI(ctk.CTk):
         xbar.pack(fill="x", padx=17, pady=(0, 8))
         report_table.configure(yscrollcommand=ybar.set, xscrollcommand=xbar.set)
         report_summary = ctk.CTkLabel(output_card, text="", text_color=self.CYAN,
-                                      font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+                                      font=ctk.CTkFont(family="Consolas", size=13, weight="bold"),
                                       anchor="w", justify="left")
         report_summary.pack(fill="x", padx=16, pady=(0, 12))
 
