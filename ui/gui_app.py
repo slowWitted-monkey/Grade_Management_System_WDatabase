@@ -16,16 +16,18 @@ from service.report_service import ReportService
 class ScheduleField(ctk.CTkFrame):
     """Read-only schedule display with a guided day and time picker."""
 
-    def __init__(self, parent, open_editor):
+    def __init__(self, parent, open_editor, *, input_color, border_color, text_color,
+                 button_color):
         super().__init__(parent, fg_color="transparent")
         self.value = tk.StringVar()
         ctk.CTkEntry(
             self, textvariable=self.value, state="readonly", height=35,
-            corner_radius=8, fg_color="#f8fafc", border_color="#c3cdd9",
-            text_color="#203047", placeholder_text="Choose days and time",
+            corner_radius=8, fg_color=input_color, border_color=border_color,
+            text_color=text_color, placeholder_text="Choose days and time",
         ).pack(side="left", fill="x", expand=True)
         ctk.CTkButton(
             self, text="Set", width=48, height=35, corner_radius=8,
+            fg_color=button_color,
             command=lambda: open_editor(self),
         ).pack(side="right", padx=(5, 0))
 
@@ -815,7 +817,10 @@ class GradeManagementGUI(ctk.CTk):
                          font=ctk.CTkFont(size=10, weight="bold"))\
                 .pack(anchor="w", padx=2, pady=(0, 5))
             if field == "schedule":
-                entry = ScheduleField(cell, self._open_schedule_picker)
+                entry = ScheduleField(
+                    cell, self._open_schedule_picker, input_color=self.INPUT,
+                    border_color=self.BORDER, text_color=self.TEXT, button_color=self.BLUE,
+                )
             elif field in choice_definitions:
                 entry, choice_maps[field] = self._make_combo(
                     cell, choice_definitions[field], default=field_defaults.get(field), height=35,
